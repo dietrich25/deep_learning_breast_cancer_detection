@@ -1,3 +1,10 @@
 # datasets
 data/raw/CBIS-DDSM
 data/raw/MIAS
+data/processed/
+
+#jupyter notebook checkpoints
+src/.ipynb_checkpoints/
+
+#virtual environment
+venv/
