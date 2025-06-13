@@ -1,3 +1,4 @@
+reference background_tissue abnormality severity center_x center_y radius_in_pixel
 mdb001 G CIRC B 535 425 197
 mdb002 G CIRC B 522 280 69
 mdb003 D NORM 
