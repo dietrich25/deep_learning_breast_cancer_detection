@@ -27,16 +27,16 @@ print(Calc_Training.columns)
 
 # Get case id from file path
 def create_case_id(file_path):
-    return os.path.dirname(file_path).split('/')[0]
+    return os.path.dirname(file_path).split("/")[0]
 
 # Add case id to each dataframe
-Mass_Test['case_id'] = Mass_Test['image file path'].apply(create_case_id)
-Mass_Training['case_id'] = Mass_Training['image file path'].apply(create_case_id)
-Calc_Test['case_id'] = Calc_Test['image file path'].apply(create_case_id)
-Calc_Training['case_id'] = Calc_Training['image file path'].apply(create_case_id)
+Mass_Test["case_id"] = Mass_Test["image file path"].apply(create_case_id)
+Mass_Training["case_id"] = Mass_Training["image file path"].apply(create_case_id)
+Calc_Test["case_id"] = Calc_Test["image file path"].apply(create_case_id)
+Calc_Training["case_id"] = Calc_Training["image file path"].apply(create_case_id)
 
 # drop binary ROI file path and cropped file path
-columns_to_drop = ['cropped image file path', 'ROI mask file path']
+columns_to_drop = ["cropped image file path", "ROI mask file path"]
 Mass_Test = Mass_Test.drop(columns=columns_to_drop)
 Mass_Training = Mass_Training.drop(columns=columns_to_drop)
 Calc_Test = Calc_Test.drop(columns=columns_to_drop)
@@ -51,7 +51,7 @@ def get_largest_dcm_file(case_id):
     
     for dirpath, dirnames, filenames in os.walk(case_folder):
         for filename in filenames:
-            if filename.lower().endswith('.dcm'):
+            if filename.lower().endswith(".dcm"):
                 filepath = os.path.join(dirpath, filename)
                 size = os.path.getsize(filepath)
                 if size > largest_size:
@@ -61,10 +61,10 @@ def get_largest_dcm_file(case_id):
     return largest_file.replace("\\", "/")
 
 # Update file paths
-Mass_Test['image file path'] = Mass_Test['case_id'].apply(get_largest_dcm_file)
-Mass_Training['image file path'] = Mass_Training['case_id'].apply(get_largest_dcm_file)
-Calc_Test['image file path'] = Calc_Test['case_id'].apply(get_largest_dcm_file)
-Calc_Training['image file path'] = Calc_Training['case_id'].apply(get_largest_dcm_file)
+Mass_Test["image file path"] = Mass_Test["case_id"].apply(get_largest_dcm_file)
+Mass_Training["image file path"] = Mass_Training["case_id"].apply(get_largest_dcm_file)
+Calc_Test["image file path"] = Calc_Test["case_id"].apply(get_largest_dcm_file)
+Calc_Training["image file path"] = Calc_Training["case_id"].apply(get_largest_dcm_file)
 
 def save_dataframe(df, output_csv_path):
     df.to_csv(output_csv_path, index=False)
