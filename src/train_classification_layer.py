@@ -4,6 +4,8 @@
 # https://www.tutorialexample.com/understand-pytorch-model-named_parameters-with-examples-pytorch-tutorial/
 # https://docs.pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.StepLR.html
 # https://discuss.pytorch.org/t/why-auxiliary-logits-set-to-false-in-train-mode/40705/7
+# https://scikit-learn.org/stable/modules/model_evaluation.html
+# https://stackoverflow.com/questions/33275461/specificity-in-scikit-learn
 
 
 from datasets import CBISDDSMDataset, MIASDataset
@@ -16,10 +18,13 @@ import torchvision.models as models
 import os
 import pandas as pd
 
+# Model evaluation metrics
+from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score,roc_auc_score, confusion_matrix
+
 # Configuration
 config = {
     "batch_size": 32,
-    "epochs": 3,
+    "epochs": 5,
     "learning_rate": 0.001,
     "num_classes": 2,
     "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
@@ -65,8 +70,10 @@ def validate_epoch(model, dataloader, criterion, device):
     # Set the model into evaluation mode
     model.eval()
     running_loss = 0.0
-    correct_predictions = 0
-    total_predictions = 0
+    all_labels = []
+    all_preds = []
+    all_probs = []
+
 
     num_batches = len(dataloader)
 
@@ -81,15 +88,26 @@ def validate_epoch(model, dataloader, criterion, device):
 
             running_loss += loss.item()
 
-            # Calc correct predictions
+            # Calculate probabilities for class 1 and predictions
+            probs = torch.softmax(outputs, dim=1)[:,1]
             _, preds = torch.max(outputs, 1)
-            correct_predictions += torch.sum(preds == labels).item()
-            total_predictions += labels.size(0)
+            all_labels.extend(labels.cpu().numpy())
+            all_preds.extend(preds.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
     
     epoch_loss = running_loss / num_batches
-    epoch_acc = correct_predictions / total_predictions
 
-    return epoch_acc, epoch_loss
+    epoch_accuracy = accuracy_score(all_labels, all_preds)
+    epoch_recall = recall_score(all_labels, all_preds)
+    epoch_precision = precision_score(all_labels, all_preds)
+    epoch_f1 = f1_score(all_labels, all_preds)
+    epoch_roc_auc = roc_auc_score(all_labels, all_probs)
+
+    #specificity 
+    tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
+    epoch_specificity = tn / (tn+fp) if (tn+fp) != 0 else float("nan")
+
+    return epoch_accuracy, epoch_loss, epoch_recall, epoch_precision, epoch_f1, epoch_roc_auc, epoch_specificity
 
 def prepare_model(model_name: str, num_classes: int) -> torch.nn.Module:
     """
@@ -112,7 +130,7 @@ def prepare_model(model_name: str, num_classes: int) -> torch.nn.Module:
         model = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1)
         classifier_name = "classifier"
     elif model_name == "inception":
-        model = models.inception_v3(weights=models.Inception_V3_Weights.IMAGENET1K_V1)
+        model = models.inception_v3(weights=models.Inception_V3_Weights.IMAGENET1K_V1, aux_logits=False)
         model.aux_logits = False
         classifier_name = "fc"
     else:
@@ -161,7 +179,8 @@ def train_model(model_name: str,
 
     history = {
         "train_loss": [], "train_acc": [],
-        "val_loss": [], "val_acc": []
+        "val_acc": [], "val_loss": [], "val_recall": [], "val_precision": [],
+        "val_f1": [], "val_roc_auc": [], "val_specificity": []
     }
 
     best_val_acc = 0.0
@@ -176,15 +195,20 @@ def train_model(model_name: str,
         train_loss, train_acc = train_epoch(model, train_dataloader,criterion,optimizer,device)
         print(f"\nTraining loss:  {train_loss:.2f}, Training accuracy: {train_acc:.2f}")
 
-        val_loss, val_acc = validate_epoch(model, validation_dataloader, criterion, device)
-        print(f"\nValidation loss:  {val_loss:.2f}, Validation accuracy: {val_acc:.2f}")
+        val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = validate_epoch(model, validation_dataloader, criterion, device)
+        print(f"\nValidation loss:  {val_loss:.2f}, Validation accuracy: {val_acc:.2f}, Validation recall: {val_recall:.2f}, Validation precision: {val_precision:.2f}, Validation F1-score: {val_f1:.2f}, Validation ROC-AUC: {val_roc_auc:.2f}, Validation Specificity: {val_specificity:.2f}")
 
         scheduler.step()
 
         history["train_loss"].append(train_loss)
         history["train_acc"].append(train_acc)
-        history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
+        history["val_loss"].append(val_loss)
+        history["val_recall"].append(val_recall)
+        history["val_precision"].append(val_precision)
+        history["val_f1"].append(val_f1)
+        history["val_roc_auc"].append(val_roc_auc)
+        history["val_specificity"].append(val_specificity)
 
         # Save best model
         if val_acc > best_val_acc:
