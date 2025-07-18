@@ -18,7 +18,7 @@ def main():
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         "checkpoints_path": "./checkpoints",
-        "results_path": "./results_path",
+        "results_path": "./results",
     }
 
     # Model training main parameters
