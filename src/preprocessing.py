@@ -18,9 +18,9 @@ imgNetMean = [0.485, 0.456, 0.406]
 imgNetStd = [0.229, 0.224, 0.225]
 
 def apply_transforms(model_type):
-    if model_type in ["resnet" , "densenet"]:
+    if model_type in ["resnet50" , "densenet121"]:
         img_size = 224
-    elif model_type == "inception":
+    elif model_type == "inception_v3":
         img_size = 299
     else:
         raise ValueError ("Invalid model_type value: " + model_type)

@@ -6,6 +6,7 @@
 # https://discuss.pytorch.org/t/why-auxiliary-logits-set-to-false-in-train-mode/40705/7
 # https://scikit-learn.org/stable/modules/model_evaluation.html
 # https://stackoverflow.com/questions/33275461/specificity-in-scikit-learn
+# https://www.geeksforgeeks.org/deep-learning/how-to-handle-overfitting-in-pytorch-models-using-early-stopping/
 
 
 from datasets import CBISDDSMDataset, MIASDataset
@@ -21,16 +22,39 @@ import pandas as pd
 # Model evaluation metrics
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score,roc_auc_score, confusion_matrix
 
-# Configuration
+""" # Configuration
 config = {
     "batch_size": 32,
     "epochs": 5,
     "learning_rate": 0.001,
     "num_classes": 2,
     "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    "checkpoints_path": "./checkpoints"
-}
+    "checkpoints_path": "./checkpoints",
+} """
 
+# code adapted from https://www.geeksforgeeks.org/deep-learning/how-to-handle-overfitting-in-pytorch-models-using-early-stopping/
+class Earlystopping:
+    def __init__(self, patience=5, delta=0):
+        self.patience = patience
+        self.delta = delta
+        self.best_loss = None
+        self.early_stop = False
+        self.counter = 0
+
+    def __call__(self, val_loss):
+        current_loss = val_loss
+
+        if self.best_loss is None:
+            self.best_loss = current_loss
+        if current_loss < self.best_loss + self.delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_loss = current_loss
+            self.counter = 0
+        return self.early_stop
+            
 def train_epoch(model, dataloader, criterion, optimizer, device):
 
     # Set the model into training mode
@@ -109,51 +133,91 @@ def validate_epoch(model, dataloader, criterion, device):
 
     return epoch_accuracy, epoch_loss, epoch_recall, epoch_precision, epoch_f1, epoch_roc_auc, epoch_specificity
 
-def prepare_model(model_name: str, num_classes: int) -> torch.nn.Module:
+def prepare_model(model_name: str, num_classes: int, training_depth: str) -> torch.nn.Module:
     """
-    Initialises and prepares a pre-trained model for transfer learning.
-    1. Loads the pretrained model
-    2. Freezes all layers except the last classifier layer
-    3. Replaces classifier for binary classification task
+    Prepare a pre-trained CNN model for transfer learning with a specific training depth
 
     Args:
         model_name(str): Name of the model ("resnet, "densenet", "inception")
         num_classes(int): Number of output classes
-
+        training_depth(str): Parameter unfreeze strategy ("classifier_only", "last_layer", "last_2_layers")
+        
     Returns:
         torch.nn.Module: Prepared model
     """
-    if model_name == "resnet":
+
+    if model_name == "resnet50":
         model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
         classifier_name = "fc"
-    elif model_name == "densenet":
+    elif model_name == "densenet121":
         model = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1)
         classifier_name = "classifier"
-    elif model_name == "inception":
-        model = models.inception_v3(weights=models.Inception_V3_Weights.IMAGENET1K_V1, aux_logits=False)
+    elif model_name == "inception_v3":
+        model = models.inception_v3(weights=models.Inception_V3_Weights.IMAGENET1K_V1, aux_logits=True)
         model.aux_logits = False
         classifier_name = "fc"
     else:
-        raise ValueError("Invalid model_name. Supported models: 'resnet', 'densenet', 'inception'")
+        raise ValueError("Invalid model_name. Supported models: 'resnet50', 'densenet121', 'inception_v3'")
     
-    # 1. Freeze all model parameters
+    # Freeze all model parameters
     for param in model.parameters():
         param.requires_grad = False
 
-    # 2. Replace classifier
+    # Replace classifier
     classifier = getattr(model, classifier_name)
     in_features = classifier.in_features
     setattr(model, classifier_name, nn.Linear(in_features, num_classes))
 
-    # 3. Unfreeze classifier layer
+    # Unfreeze classifier layer
     classifier = getattr(model, classifier_name)
     for param in classifier.parameters():
         param.requires_grad = True
     
+    # Unfreeze model specific layers for training
+    if training_depth == "last_layer":
+        if model_name == "resnet50":
+            for param in model.layer4.parameters():
+                param.requires_grad = True
+        elif model_name == "densenet121":
+            for param in model.features.denseblock4.parameters():
+                param.requires_grad = True
+            for param in model.features.norm5.parameters():
+                param.requires_grad = True
+        elif model_name == "inception_v3":
+            for param in model.Mixed_7c.parameters():
+                param.requires_grad = True
+
+    elif training_depth == "last_2_layers":
+        if model_name == "resnet50":
+            for param in model.layer3.parameters():
+                param.requires_grad = True
+            for param in model.layer4.parameters():
+                param.requires_grad = True
+        elif model_name == "densenet121":
+            for param in model.features.denseblock3.parameters():
+                param.requires_grad = True
+            for param in model.features.transition3.parameters():
+                param.requires_grad = True
+            for param in model.features.denseblock4.parameters():
+                param.requires_grad = True
+            for param in model.features.norm5.parameters():
+                param.requires_grad = True
+        elif model_name == "inception_v3":
+            for param in model.Mixed_7b.parameters():
+                param.requires_grad = True
+            for param in model.Mixed_7c.parameters():
+                param.requires_grad = True
+    else:
+        if training_depth !="classifier_only":
+            raise ValueError(f"Incoreect parameter passed for model training depth: {training_depth}")
+
     return model
 
 # code adapted from https://docs.pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
 def train_model(model_name: str,
+                learning_rate: int,
+                optimizer_name: str,
+                training_depth: str,
                 model: torch.nn.Module,
                 device: torch.device,
                 train_dataloader: DataLoader,
@@ -174,16 +238,30 @@ def train_model(model_name: str,
     """
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma = 0.1)
+    if optimizer_name == "adam":
+        optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
+    elif optimizer_name == "adamw":
+        optimizer = optim.AdamW(model.parameters(), lr=config["learning_rate"])
+    elif optimizer_name == "sgd":
+        optimizer = optim.SGD(model.parameters(), learning_rate, momentum = 0.9) 
+    else:
+        raise ValueError(f"Invalid optimizer selected: {optimizer_name}")
+
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    early_stop = Earlystopping(patience=5, delta=0.001)
 
     history = {
+        "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
         "train_loss": [], "train_acc": [],
         "val_acc": [], "val_loss": [], "val_recall": [], "val_precision": [],
         "val_f1": [], "val_roc_auc": [], "val_specificity": []
     }
 
-    best_val_acc = 0.0
+    best_val_f1 = 0.0 
+    best_model_state_dict = None
+    best_optimizer_state_dict = None
+    best_epoch = 0
+
 
     print(f"\nStarting training {model_name} on {device}.")
     print("---------------------------------------------------")
@@ -198,8 +276,12 @@ def train_model(model_name: str,
         val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = validate_epoch(model, validation_dataloader, criterion, device)
         print(f"\nValidation loss:  {val_loss:.2f}, Validation accuracy: {val_acc:.2f}, Validation recall: {val_recall:.2f}, Validation precision: {val_precision:.2f}, Validation F1-score: {val_f1:.2f}, Validation ROC-AUC: {val_roc_auc:.2f}, Validation Specificity: {val_specificity:.2f}")
 
-        scheduler.step()
+        scheduler.step(1.0 - val_f1)
 
+        history["model_name"].append(model_name)
+        history["LR"].append(learning_rate)
+        history["training_depth"].append(training_depth)
+        history["optimizer"].append(optimizer_name)
         history["train_loss"].append(train_loss)
         history["train_acc"].append(train_acc)
         history["val_acc"].append(val_acc)
@@ -211,25 +293,29 @@ def train_model(model_name: str,
         history["val_specificity"].append(val_specificity)
 
         # Save best model
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            output_path = os.path.join(config["checkpoints_path"], f"{model_name}_best.pth")
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
+            best_model_state_dict = model.state_dict()
+            best_optimizer_state_dict = optimizer.state_dict()
+            best_epoch = epoch
+            #output_path = os.path.join(config["checkpoints_path"], f"{model_name}_best.pth")
 
-            torch.save({
+            """ torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "val_acc": val_acc,
                 "config": config
             },output_path)
-            print(f"Model with best accuracy {val_acc:.2f} saved.")
+            print(f"Model with best accuracy {val_acc:.2f} saved.") """
+        
+        if early_stop(val_acc):
+            print(f"Early stopping forced at epoch {epoch + 1}")
+            return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
     
-    return history
+    return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
 
-def main():
-    """
-    Main function to run the pipeline.
-    """
+""" def main():
 
     model_names = ["resnet", "densenet", "inception"]
 
@@ -268,4 +354,4 @@ def main():
 if __name__ == "__main__":
     main()
     
-
+ """
