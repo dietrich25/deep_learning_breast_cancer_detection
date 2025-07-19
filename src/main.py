@@ -46,9 +46,9 @@ def main():
     Depth = ["classifier_only", "last_layer"]
 
     best_models = {
-        "resnet50": {"learning_rate:": 0.0, "optimizer": None, "depth": None, "accuracy": 0.0, "f1_score": 0.0, "AUC": 0.0},
-        "densenet121": {"learning_rate:": 0.0, "optimizer": None, "depth": None, "accuracy": 0.0, "f1_score": 0.0, "AUC": 0.0},
-        "inception_v3": {"learning_rate:": 0.0, "optimizer": None, "depth": None, "accuracy": 0.0, "f1_score": 0.0, "AUC": 0.0}
+        "resnet50": {"learning_rate": 0.0, "optimizer": None, "depth": None, "accuracy": 0.0, "f1_score": 0.0, "AUC": 0.0},
+        "densenet121": {"learning_rate": 0.0, "optimizer": None, "depth": None, "accuracy": 0.0, "f1_score": 0.0, "AUC": 0.0},
+        "inception_v3": {"learning_rate": 0.0, "optimizer": None, "depth": None, "accuracy": 0.0, "f1_score": 0.0, "AUC": 0.0}
     }
 
     # Checkpoint and result directories
@@ -164,7 +164,7 @@ def main():
                 "epoch": model_best_states["epoch"]
             })
 
-            logging.info(f"Best transfer learning parameters: LR={model_best_result['learning_rate']}, Optimizer={model_best_result['optimizer']}, Depth={model_best_result['training_depth']}.")
+            logging.info(f"Best transfer learning parameters: LR={model_best_result['LR']}, Optimizer={model_best_result['optimizer']}, Depth={model_best_result['training_depth']}.")
         else:
             logging.error(f"{model_name} training failed to save best performing model data.")
            
