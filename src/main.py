@@ -153,7 +153,7 @@ def main():
                 "optimizer": model_best_result["optimizer"],
                 "depth": model_best_result["training_depth"],
                 "train_loss": model_best_result["train_loss"],
-                "train_val": model_best_result["train_val"],
+                "train_acc": model_best_result["train_acc"],
                 "val_acc": model_best_result["val_acc"],
                 "val_loss": model_best_result["val_loss"],
                 "val_recall": model_best_result["val_recall"],
