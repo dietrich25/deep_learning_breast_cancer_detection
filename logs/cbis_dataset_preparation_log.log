@@ -1,0 +1,42 @@
+2025-07-20 12:18:16,565 - INFO - Logging initialised, log file: ./logs\cbis_dataset_preparation_log.log
+2025-07-20 12:18:16,565 - INFO - 
+================= Mass Test Columns =================
+2025-07-20 12:18:16,565 - INFO - Index(['patient_id', 'breast_density', 'left or right breast', 'image view',
+       'abnormality id', 'abnormality type', 'mass shape', 'mass margins',
+       'assessment', 'pathology', 'subtlety', 'image file path',
+       'cropped image file path', 'ROI mask file path'],
+      dtype='object')
+2025-07-20 12:18:16,567 - INFO - 
+================= Mass Training Columns =================
+2025-07-20 12:18:16,567 - INFO - Index(['patient_id', 'breast_density', 'left or right breast', 'image view',
+       'abnormality id', 'abnormality type', 'mass shape', 'mass margins',
+       'assessment', 'pathology', 'subtlety', 'image file path',
+       'cropped image file path', 'ROI mask file path'],
+      dtype='object')
+2025-07-20 12:18:16,567 - INFO - 
+================= Calc Test Columns =================
+2025-07-20 12:18:16,567 - INFO - Index(['patient_id', 'breast density', 'left or right breast', 'image view',
+       'abnormality id', 'abnormality type', 'calc type', 'calc distribution',
+       'assessment', 'pathology', 'subtlety', 'image file path',
+       'cropped image file path', 'ROI mask file path'],
+      dtype='object')
+2025-07-20 12:18:16,567 - INFO - 
+================= Calc Training Columns =================
+2025-07-20 12:18:16,567 - INFO - Index(['patient_id', 'breast density', 'left or right breast', 'image view',
+       'abnormality id', 'abnormality type', 'calc type', 'calc distribution',
+       'assessment', 'pathology', 'subtlety', 'image file path',
+       'cropped image file path', 'ROI mask file path'],
+      dtype='object')
+2025-07-20 12:18:16,569 - INFO - Column names standardised across dataframes...
+2025-07-20 12:18:16,575 - INFO - Case ID extracted from the file path and added as a column to each dataframe...
+2025-07-20 12:18:16,578 - INFO - Binary ROI file path and cropped image path dropped from the dataframes (out of scope)...
+2025-07-20 12:18:16,578 - INFO - 
+================= Starting metadata adjustment =================
+2025-07-20 12:18:17,680 - INFO - File paths for full image mammograms have been updated to match local storage structure.
+2025-07-20 12:18:17,682 - INFO - Column structure standardised across dataframes...
+2025-07-20 12:18:17,683 - INFO - 
+================= Combine mass and calcification datasets =================
+2025-07-20 12:18:17,686 - INFO - Datasets successfully merged...
+2025-07-20 12:18:17,686 - INFO - 
+================= Save dataframes =================
+2025-07-20 12:18:17,718 - INFO - Prepared dataset information saved to ./data/processed/.

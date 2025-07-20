@@ -164,7 +164,8 @@ def main():
                 "epoch": model_best_states["epoch"]
             })
 
-            logging.info(f"Best transfer learning parameters: LR={model_best_result['LR']}, Optimizer={model_best_result['optimizer']}, Depth={model_best_result['training_depth']}.")
+            for i in range(3):
+                logging.info(f"Best transfer learning parameters: model={model_best_result['model_name'][i]}, LR={model_best_result['LR'][i]}, Optimizer={model_best_result['optimizer'][i]}, Depth={model_best_result['training_depth'][i]}.")
         else:
             logging.error(f"{model_name} training failed to save best performing model data.")
            
