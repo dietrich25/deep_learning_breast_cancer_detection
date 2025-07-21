@@ -1,42 +1,64 @@
-2025-07-20 12:18:16,565 - INFO - Logging initialised, log file: ./logs\cbis_dataset_preparation_log.log
-2025-07-20 12:18:16,565 - INFO - 
+2025-07-20 16:47:31,445 - INFO - Logging initialised, log file: ./logs\cbis_dataset_preparation_log.log
+2025-07-20 16:47:31,445 - INFO - 
 ================= Mass Test Columns =================
-2025-07-20 12:18:16,565 - INFO - Index(['patient_id', 'breast_density', 'left or right breast', 'image view',
+2025-07-20 16:47:31,445 - INFO - Index(['patient_id', 'breast_density', 'left or right breast', 'image view',
        'abnormality id', 'abnormality type', 'mass shape', 'mass margins',
        'assessment', 'pathology', 'subtlety', 'image file path',
        'cropped image file path', 'ROI mask file path'],
       dtype='object')
-2025-07-20 12:18:16,567 - INFO - 
+2025-07-20 16:47:31,446 - INFO - 
 ================= Mass Training Columns =================
-2025-07-20 12:18:16,567 - INFO - Index(['patient_id', 'breast_density', 'left or right breast', 'image view',
+2025-07-20 16:47:31,446 - INFO - Index(['patient_id', 'breast_density', 'left or right breast', 'image view',
        'abnormality id', 'abnormality type', 'mass shape', 'mass margins',
        'assessment', 'pathology', 'subtlety', 'image file path',
        'cropped image file path', 'ROI mask file path'],
       dtype='object')
-2025-07-20 12:18:16,567 - INFO - 
+2025-07-20 16:47:31,446 - INFO - 
 ================= Calc Test Columns =================
-2025-07-20 12:18:16,567 - INFO - Index(['patient_id', 'breast density', 'left or right breast', 'image view',
+2025-07-20 16:47:31,446 - INFO - Index(['patient_id', 'breast density', 'left or right breast', 'image view',
        'abnormality id', 'abnormality type', 'calc type', 'calc distribution',
        'assessment', 'pathology', 'subtlety', 'image file path',
        'cropped image file path', 'ROI mask file path'],
       dtype='object')
-2025-07-20 12:18:16,567 - INFO - 
+2025-07-20 16:47:31,447 - INFO - 
 ================= Calc Training Columns =================
-2025-07-20 12:18:16,567 - INFO - Index(['patient_id', 'breast density', 'left or right breast', 'image view',
+2025-07-20 16:47:31,447 - INFO - Index(['patient_id', 'breast density', 'left or right breast', 'image view',
        'abnormality id', 'abnormality type', 'calc type', 'calc distribution',
        'assessment', 'pathology', 'subtlety', 'image file path',
        'cropped image file path', 'ROI mask file path'],
       dtype='object')
-2025-07-20 12:18:16,569 - INFO - Column names standardised across dataframes...
-2025-07-20 12:18:16,575 - INFO - Case ID extracted from the file path and added as a column to each dataframe...
-2025-07-20 12:18:16,578 - INFO - Binary ROI file path and cropped image path dropped from the dataframes (out of scope)...
-2025-07-20 12:18:16,578 - INFO - 
+2025-07-20 16:47:31,448 - INFO - Column names standardised across dataframes...
+2025-07-20 16:47:31,454 - INFO - Case ID extracted from the file path and added as a column to each dataframe...
+2025-07-20 16:47:31,455 - INFO - Binary ROI file path and cropped image path dropped from the dataframes (out of scope)...
+2025-07-20 16:47:31,455 - INFO - 
 ================= Starting metadata adjustment =================
-2025-07-20 12:18:17,680 - INFO - File paths for full image mammograms have been updated to match local storage structure.
-2025-07-20 12:18:17,682 - INFO - Column structure standardised across dataframes...
-2025-07-20 12:18:17,683 - INFO - 
+2025-07-20 16:47:31,999 - INFO - File paths for full image mammograms have been updated to match local storage structure.
+2025-07-20 16:47:32,001 - INFO - Column structure standardised across dataframes...
+2025-07-20 16:47:32,001 - INFO - 
 ================= Combine mass and calcification datasets =================
-2025-07-20 12:18:17,686 - INFO - Datasets successfully merged...
-2025-07-20 12:18:17,686 - INFO - 
+2025-07-20 16:47:32,006 - INFO - Datasets successfully merged...
+2025-07-20 16:47:32,006 - INFO - 
+================= Inspect class distribution =================
+2025-07-20 16:47:32,009 - INFO - Training set class value distribution: pathology
+MALIGNANT                  1181
+BENIGN                     1105
+BENIGN_WITHOUT_CALLBACK     578
+Name: count, dtype: int64
+2025-07-20 16:47:32,009 - INFO - Training set percentage distribution: pathology
+MALIGNANT                  41.24
+BENIGN                     38.58
+BENIGN_WITHOUT_CALLBACK    20.18
+Name: proportion, dtype: float64%
+2025-07-20 16:47:32,010 - INFO - Test set class value distribution: pathology
+BENIGN                     324
+MALIGNANT                  276
+BENIGN_WITHOUT_CALLBACK    104
+Name: count, dtype: int64
+2025-07-20 16:47:32,010 - INFO - Test set percentage distribution: pathology
+BENIGN                     46.02
+MALIGNANT                  39.20
+BENIGN_WITHOUT_CALLBACK    14.77
+Name: proportion, dtype: float64%
+2025-07-20 16:47:32,010 - INFO - 
 ================= Save dataframes =================
-2025-07-20 12:18:17,718 - INFO - Prepared dataset information saved to ./data/processed/.
+2025-07-20 16:47:32,033 - INFO - Prepared dataset information saved to ./data/processed/.

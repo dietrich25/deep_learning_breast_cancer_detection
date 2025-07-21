@@ -8,17 +8,13 @@
 # https://stackoverflow.com/questions/33275461/specificity-in-scikit-learn
 # https://www.geeksforgeeks.org/deep-learning/how-to-handle-overfitting-in-pytorch-models-using-early-stopping/
 
-
-from datasets import CBISDDSMDataset, MIASDataset
-from preprocessing import apply_transforms
 from torch.utils.data import DataLoader
 from torch import optim
 import torch 
 import torch.nn as nn
 import torchvision.models as models
-import os
-import pandas as pd
 import logging
+import time
 
 # Model evaluation metrics
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score,roc_auc_score, confusion_matrix
@@ -33,20 +29,22 @@ class Earlystopping:
         self.counter = 0
 
     def __call__(self, val_loss):
-        current_loss = val_loss
 
         if self.best_loss is None:
-            self.best_loss = current_loss
-        if current_loss < self.best_loss + self.delta:
-            self.counter += 1
-            if self.counter >= self.patience:
-                self.early_stop = True
-        else:
-            self.best_loss = current_loss
+            self.best_loss = val_loss
+            return False
+        
+        if val_loss < self.best_loss - self.delta:
+            self.best_loss = val_loss
             self.counter = 0
-        return self.early_stop
+        else:
+            self.counter += 1
+
+        return self.counter >= self.patience
             
 def train_epoch(model, dataloader, criterion, optimizer, device):
+
+    start_time = time.time()
 
     # Set the model into training mode
     model.train()
@@ -76,13 +74,17 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
         correct_predictions += torch.sum(preds == labels).item()
         total_predictions += labels.size(0)
     
+    epoch_time = time.time() - start_time
+
     epoch_loss = running_loss / num_batches
     epoch_acc = correct_predictions / total_predictions
-    logging.debug(f"Model training epoch completed. Loss={epoch_loss:.4f}, Accuracy={epoch_acc:.4f}")
+    logging.info(f"Training epoch completed: {epoch_time:.1f}s | Training Loss:{epoch_loss:.4f} | Training Accuracy={epoch_acc:.4f}")
 
     return epoch_acc, epoch_loss
     
 def validate_epoch(model, dataloader, criterion, device):
+
+    start_time = time.time()
     
     # Set the model into evaluation mode
     model.eval()
@@ -96,7 +98,7 @@ def validate_epoch(model, dataloader, criterion, device):
 
     # Run validation without gradient calculation
     with torch.no_grad():
-        for bacth_idx, (inputs, labels) in enumerate(dataloader):
+        for batch_idx, (inputs, labels) in enumerate(dataloader):
             # Position data to the same device where the model is
             inputs, labels = inputs.to(device), labels.to(device)
 
@@ -112,6 +114,7 @@ def validate_epoch(model, dataloader, criterion, device):
             all_preds.extend(preds.cpu().numpy())
             all_probs.extend(probs.cpu().numpy())
     
+    epoch_time = time.time() - start_time
     epoch_loss = running_loss / num_batches
 
     epoch_accuracy = accuracy_score(all_labels, all_preds)
@@ -124,16 +127,8 @@ def validate_epoch(model, dataloader, criterion, device):
     tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
     epoch_specificity = tn / (tn+fp) if (tn+fp) != 0 else float("nan")
 
-    logging.debug(
-        f"Validation epoch completed: "
-        f"Loss={epoch_loss:.4f}, "
-        f"Accuracy={epoch_accuracy:.4f}, "
-        f"Precision={epoch_precision:.4f}, "
-        f"Recall={epoch_recall:.4f}, "
-        f"F1={epoch_f1:.4f}, "
-        f"Specificity={epoch_specificity:.4f}, "
-        f"ROC-AUC={epoch_roc_auc:.4f}"
-    )
+    logging.info(f"Validation epoch completed: {epoch_time:.1f}s | Loss: {epoch_loss:.4f} | F1: {epoch_f1:.4f} | Acc: {epoch_accuracy:.4f}")
+    logging.debug(f"Precision={epoch_precision:.4f} | Recall={epoch_recall:.4f} | Specificity={epoch_specificity:.4f} | ROC-AUC={epoch_roc_auc:.4f}")
 
     return epoch_accuracy, epoch_loss, epoch_recall, epoch_precision, epoch_f1, epoch_roc_auc, epoch_specificity
 
@@ -228,8 +223,8 @@ def prepare_model(model_name: str, num_classes: int, training_depth: str) -> tor
             logging.debug("Inception_V3 mixed_7b and mixed_7c unfrozen for training...")
     else:
         if training_depth !="classifier_only":
-            logging.error(f"Incoreect parameter passed for model training depth: {training_depth}")
-            raise ValueError(f"Incoreect parameter passed for model training depth: {training_depth}")
+            logging.error(f"Incorrect parameter passed for model training depth: {training_depth}")
+            raise ValueError(f"Incorrect parameter passed for model training depth: {training_depth}")
         
     logging.debug(f"Model {model_name} prepared for training...")
     return model
@@ -258,7 +253,8 @@ def train_model(model_name: str,
         history(dict): Dictionary containing the training and validation losses and accuracies. 
     """
 
-    logging.debug(f"Initialising training for {model_name} with LR={learning_rate}, optimizer={optimizer_name}, depth={training_depth}.")
+    total_start_time = time.time()
+    logging.debug(f"**Initialising training for {model_name} with LR={learning_rate}, optimizer={optimizer_name}, depth={training_depth}.")
 
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
@@ -274,7 +270,7 @@ def train_model(model_name: str,
     logging.debug(f"Optimizer {optimizer_name} initialised with {learning_rate} learning rate.")
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-    early_stop = Earlystopping(patience=5, delta=0.001)
+    early_stop = Earlystopping(patience=5, delta=0.01)
     logging.debug("Learning rate scheduler and early stopping initialised.")
 
     history = {
@@ -289,14 +285,17 @@ def train_model(model_name: str,
     best_optimizer_state_dict = None
     best_epoch = 0
 
-    logging.debug(f"Starting training {model_name} on {device} for {config["epochs"]} epochs.")
+    logging.debug(f"Starting training {model_name} on {device} for {config['epochs']} epochs.")
 
     for epoch in range(config["epochs"]):
-        logging.debug(f"Epoch progress: {epoch+1}/{config["epochs"]}")
+        epoch_start_time = time.time()
+        logging.debug(f"Epoch progress: {epoch+1}/{config['epochs']}")
 
-        train_loss, train_acc = train_epoch(model, train_dataloader,criterion,optimizer,device)
+        train_acc, train_loss = train_epoch(model, train_dataloader,criterion,optimizer,device)
 
         val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = validate_epoch(model, validation_dataloader, criterion, device)
+
+        epoch_time = time.time() - epoch_start_time
 
         # Learning rate scheduling
         old_lr = optimizer.param_groups[0]['lr']
@@ -319,18 +318,21 @@ def train_model(model_name: str,
         history["val_roc_auc"].append(val_roc_auc)
         history["val_specificity"].append(val_specificity)
 
+        logging.info(f"Epoch {epoch+1}/{config['epochs']} completed in {epoch_time:.1f}s | Val F1: {val_f1:.4f}")
+
         # Save best model
         if val_f1 > best_val_f1:
             best_val_f1 = val_f1
             best_model_state_dict = model.state_dict()
             best_optimizer_state_dict = optimizer.state_dict()
             best_epoch = epoch
-            logging.debug(f"New best model saved with F1-score: {val_f1:.4f}.")
+            logging.debug(f"**New best model saved with F1-score: {val_f1:.4f}.**")
         
-        if early_stop(1.0 - val_f1):
-            logging.debug(f"Early stopping triggered at epoch {epoch + 1}. Model training stopped, best performing model with F1-score {val_f1:.4f} to be returned")
+        if early_stop(val_loss):
+            logging.debug(f"Early stopping triggered at epoch {epoch + 1}.")
             return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
     
-    logging.debug("Model training completed, best performing model with F1-score {val_f1:.4f} to be returned....")
+    total_time = time.time() - total_start_time
+    logging.info(f"**Training completed. Total time: {total_time/60:.1f} minutes | Best F1-score {val_f1:.4f}")
     return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
 

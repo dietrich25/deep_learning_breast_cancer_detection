@@ -5,7 +5,7 @@
 import logging
 from datasets import CBISDDSMDataset, MIASDataset
 from preprocessing import apply_transforms
-from train_classification_layer import prepare_model, train_model
+from transfer_learning_trainer import prepare_model, train_model
 from torch.utils.data import DataLoader
 import torch
 import os
@@ -19,7 +19,7 @@ def main():
 
     config = {
         "batch_size": 32,
-        "epochs": 3,
+        "epochs": 5,
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         "checkpoints_path": "./checkpoints",
@@ -34,16 +34,13 @@ def main():
                         format="%(asctime)s - %(levelname)s - %(message)s",
                         handlers = [logging.FileHandler(log_path), logging.StreamHandler()])
     
-    logging.info(f"Logging initialised, log file: {log_path}")
+    logging.info(f"Log file: {log_path}")
 
     # Model training main parameters
     Models = ["resnet50", "densenet121", "inception_v3"]
-    #LR = [1e-4, 1e-3]
-    LR = [1e-3]
-    #Optimizers = ["adam", "adamw", "sgd"]
-    Optimizers = ["adam"]
-    #Depth = ["classifier_only", "last_layer", "last_2_layers"]
-    Depth = ["classifier_only", "last_layer"]
+    LR = [1e-4, 1e-3]
+    Optimizers = ["adam", "adamw", "sgd"]
+    Depth = ["classifier_only", "last_layer", "last_2_layers"]
 
     best_models = {
         "resnet50": {"learning_rate": 0.0, "optimizer": None, "depth": None, "accuracy": 0.0, "f1_score": 0.0, "AUC": 0.0},
@@ -58,8 +55,8 @@ def main():
     # Load datasets
     logging.info("Loading datasets...")
     try:
-        train_mass_df = pd.read_csv("./data/processed/mass_case_description_train_set_mapped.csv")
-        val_mass_df = pd.read_csv("./data/processed/mass_case_description_test_set_mapped.csv")
+        train_mass_df = pd.read_csv("./data/processed/combined_training_set_mapped.csv")
+        val_mass_df = pd.read_csv("./data/processed/combined_test_set_mapped.csv")
         logging.info("Datasets successfully loaded.")
     except Exception as e:
         logging.error(f"Dataset loading failed with error {str(e)}")
@@ -67,36 +64,31 @@ def main():
 
     overall_results = []
     total_combinations = len(Models) * len(LR) * len(Optimizers) * len(Depth)
-    logging.info(f"Training will be initialised for {total_combinations} configurations.")
     combination_count = 0
 
     training_start = datetime.now()
-    logging.info(f"Systematic model training startet at {training_start.strftime("%Y-%m-%d %H:%M:%S")}")
+    logging.info(f"Systematic training start | {total_combinations} configurations | {training_start.strftime('%Y-%m-%d %H:%M:%S')}***")
 
     # Systematic model training
     for model_name in Models:
         model_training_start = datetime.now()
-        logging.info(f"Model training workflow initiated for {model_name} family... at {model_training_start.strftime("%Y-%m-%d %H:%M:%S")}")
+        logging.info(f"Model: {model_name}")
         
         train_transform, val_transform = apply_transforms(model_name)
-
         train_mass_dataset = CBISDDSMDataset(train_mass_df, transform=train_transform)
         val_mass_dataset = CBISDDSMDataset(val_mass_df, transform=val_transform)
-        logging.debug("Training and validation datasets passed to the model.")
 
         train_loader = DataLoader(train_mass_dataset, 
                                 batch_size=config["batch_size"],
                                 shuffle=True,
                                 num_workers=4,
                                 pin_memory=True)
-        logging.debug("Training loader initialised.")
         
         val_loader = DataLoader(val_mass_dataset, 
                                 batch_size=config["batch_size"],
                                 shuffle=False,
                                 num_workers=4,
                                 pin_memory=True)
-        logging.debug("Validation loader initialised.")
 
         # store best performing model constellation
         model_best_f1 = 0.0
@@ -105,13 +97,10 @@ def main():
         
         for lr, optimizer, depth in product(LR, Optimizers, Depth):
             combination_count += 1
-            logging.info(f"Training progress {combination_count}/{total_combinations}")
-            logging.info(f"Training parameters: LR:{lr} Optimizer:{optimizer} Depth:{depth}")
+            logging.info(f"Config {combination_count}/{total_combinations} | LR:{lr} | Optimizer:{optimizer} | Depth:{depth}")
 
             try:
                 model = prepare_model(model_name, config["num_classes"], depth)
-                logging.debug(f"Model initialised - {model_name}.")
-                logging.info("Training workflow started...")
                 result, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_f1 = train_model(model_name=model_name,
                                     learning_rate=lr, optimizer_name=optimizer, training_depth=depth, 
                                     model=model, 
@@ -119,7 +108,7 @@ def main():
                                     train_dataloader=train_loader, 
                                     validation_dataloader=val_loader, 
                                     config=config)
-                logging.info(f"{model_name} training for parameter combination LR: {lr}; Optimizer:{optimizer}; Depth:{depth} finished with F1-score {best_f1}.")
+                logging.info(f"Result | F1:{best_f1:.4f} | Epoch:{best_epoch}")
                 overall_results.append(result)
 
                 if best_f1 > model_best_f1:
@@ -132,10 +121,10 @@ def main():
                         "epoch": best_epoch,
                         "f1_score": best_f1
                     }
-                    logging.info(f"New best model for {model_name}: F1={best_f1:.2f}")
+                    logging.info(f"New best for {model_name}: F1={best_f1:.4f}")
             
             except Exception as e:
-                logging.error(f"Training failed for {model_name} with params LR:{lr}, Optimizer:{optimizer}, Depth:{depth}. Error: {str(e)}")
+                logging.error(f"FAILED | {model_name} | LR:{lr} | Optimizer:{optimizer} | Depth:{depth} | Error: {str(e)}")
                 continue
 
         if model_best_states is not None:
@@ -146,7 +135,7 @@ def main():
                 "val_f1": model_best_states["f1_score"],
                 "config": config
                 }, output_path)
-            logging.info(f"Best model version for {model_name} saved.")
+            logging.info(f"Best model for {model_name} saved.")
 
             best_models[model_name].update({
                 "learning_rate": model_best_result["LR"],
@@ -169,8 +158,11 @@ def main():
         else:
             logging.error(f"{model_name} training failed to save best performing model data.")
            
+        model_time = datetime.now() - model_training_start
+        logging.info(f"{model_name} complete | Total time: {model_time.total_seconds()/60:.1f} minutes.")
+    
     # Store all training results
-    results_file = os.path.join(config["results_path"], f"training_results_{model_name}.json")
+    results_file = os.path.join(config["results_path"], f"training_results.json")
     with open(results_file, 'w') as f:
         json.dump(overall_results, f, indent=2)
     
@@ -178,6 +170,7 @@ def main():
     best_models_file = os.path.join(config["results_path"], f"training_results_best_models.json")
     with open(best_models_file, 'w') as f:
         json.dump(best_models, f, indent=2)
+    
 
 if __name__ == "__main__":
     import multiprocessing

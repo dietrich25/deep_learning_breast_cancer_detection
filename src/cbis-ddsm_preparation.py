@@ -152,6 +152,18 @@ Combined_Training = pd.concat([Mass_Training, Calc_Training], ignore_index=True)
 Combined_Test = pd.concat([Mass_Test, Calc_Test], ignore_index=True)
 logging.info("Datasets successfully merged...")
 
+logging.info("\n================= Inspect class distribution =================")
+training_distribution = Combined_Training['pathology'].value_counts()
+test_distribution = Combined_Test['pathology'].value_counts()
+perc_training = Combined_Training['pathology'].value_counts(normalize=True) * 100
+perc_test = Combined_Test['pathology'].value_counts(normalize=True) * 100
+
+logging.info(f"Training set class value distribution: {training_distribution}")
+logging.info(f"Training set percentage distribution: {perc_training.round(2)}%")
+logging.info(f"Test set class value distribution: {test_distribution}")
+logging.info(f"Test set percentage distribution: {perc_test.round(2)}%")
+
+
 def save_dataframe(df: pd.DataFrame, output_csv_path: str):
     """
     Saves a pd.DataFrame to csv file.

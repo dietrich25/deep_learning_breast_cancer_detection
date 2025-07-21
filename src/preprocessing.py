@@ -28,8 +28,10 @@ def apply_transforms(model_type):
     training_transform = transforms.Compose([
         transforms.Resize((img_size,img_size)),
         transforms.Grayscale(num_output_channels=3), 
-        transforms.RandomHorizontalFlip(p=0.5), # random flip with 50% probability
-        transforms.RandomRotation(10), # random rotation -10 to +10 degrees
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.3),
+        transforms.RandomRotation(10),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),
         transforms.ToTensor(),
         transforms.Normalize(mean = imgNetMean, std = imgNetStd)
     ])
