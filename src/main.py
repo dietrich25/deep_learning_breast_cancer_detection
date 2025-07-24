@@ -18,8 +18,8 @@ import json
 def main():
 
     config = {
-        "batch_size": 32,
-        "epochs": 5,
+        "batch_size": 16,
+        "epochs": 50,
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         "checkpoints_path": "./checkpoints",
@@ -37,10 +37,13 @@ def main():
     logging.info(f"Log file: {log_path}")
 
     # Model training main parameters
-    Models = ["resnet50", "densenet121", "inception_v3"]
-    LR = [1e-4, 1e-3]
-    Optimizers = ["adam", "adamw", "sgd"]
-    Depth = ["classifier_only", "last_layer", "last_2_layers"]
+    Models = ["resnet50"]
+    # , "densenet121", "inception_v3"
+    LR = [1e-4]
+    Optimizers = ["adam"] 
+    #, "adamw", "sgd
+    Depth = ["last_2_layers"]
+    # Depth = ["classifier_only", "last_layer", "last_2_layers"]
 
     best_models = {
         "resnet50": {"learning_rate": 0.0, "optimizer": None, "depth": None, "accuracy": 0.0, "f1_score": 0.0, "AUC": 0.0},
@@ -81,13 +84,13 @@ def main():
         train_loader = DataLoader(train_mass_dataset, 
                                 batch_size=config["batch_size"],
                                 shuffle=True,
-                                num_workers=4,
+                                num_workers=12,
                                 pin_memory=True)
         
         val_loader = DataLoader(val_mass_dataset, 
                                 batch_size=config["batch_size"],
                                 shuffle=False,
-                                num_workers=4,
+                                num_workers=12,
                                 pin_memory=True)
 
         # store best performing model constellation
@@ -162,7 +165,7 @@ def main():
         logging.info(f"{model_name} complete | Total time: {model_time.total_seconds()/60:.1f} minutes.")
     
     # Store all training results
-    results_file = os.path.join(config["results_path"], f"training_results.json")
+    results_file = os.path.join(config["results_path"], f"training_results_{workflow_start_timestamp}.json")
     with open(results_file, 'w') as f:
         json.dump(overall_results, f, indent=2)
     

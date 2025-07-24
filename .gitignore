@@ -20,3 +20,5 @@ test.py
 
 #training performance data
 .pth
+
+/logs

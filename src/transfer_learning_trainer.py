@@ -37,8 +37,10 @@ class Earlystopping:
         if val_loss < self.best_loss - self.delta:
             self.best_loss = val_loss
             self.counter = 0
+            logging.debug(f"EarlyStop counter reseted to: {self.counter}")
         else:
             self.counter += 1
+            logging.debug(f"EarlyStop counter increased to: {self.counter}")
 
         return self.counter >= self.patience
             
@@ -259,7 +261,7 @@ def train_model(model_name: str,
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
     if optimizer_name == "adam":
-        optimizer = optim.Adam(model.parameters(), learning_rate)
+        optimizer = optim.Adam(model.parameters(), learning_rate, weight_decay=1e-4)
     elif optimizer_name == "adamw":
         optimizer = optim.AdamW(model.parameters(), learning_rate)
     elif optimizer_name == "sgd":
@@ -270,7 +272,7 @@ def train_model(model_name: str,
     logging.debug(f"Optimizer {optimizer_name} initialised with {learning_rate} learning rate.")
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-    early_stop = Earlystopping(patience=5, delta=0.01)
+    early_stop = Earlystopping(patience=10, delta=0.01)
     logging.debug("Learning rate scheduler and early stopping initialised.")
 
     history = {
@@ -329,7 +331,7 @@ def train_model(model_name: str,
             logging.debug(f"**New best model saved with F1-score: {val_f1:.4f}.**")
         
         if early_stop(val_loss):
-            logging.debug(f"Early stopping triggered at epoch {epoch + 1}.")
+            logging.warning(f"Early stopping triggered at epoch {epoch + 1}.")
             return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
     
     total_time = time.time() - total_start_time

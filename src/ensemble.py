@@ -46,13 +46,13 @@ class DemoEnsemble(nn.Module):
         return ensemble_logits
 
 def load_model(model_name, checkpoint, device, num_classes):
-        if model_name == "resnet":
+        if model_name == "resnet50":
             model = models.resnet50(weights=None)
             model.fc = nn.Linear(model.fc.in_features, num_classes)
-        if model_name == "densenet":
+        if model_name == "densenet121":
             model = models.densenet121(weights=None)
             model.classifier = nn.Linear(model.classifier.in_features, num_classes)
-        if model_name == "inception":
+        if model_name == "inception_v3":
             model = models.inception_v3(weights=None)
             model.aux_logits = False
             model.fc = nn.Linear(model.fc.in_features, num_classes)
@@ -104,13 +104,13 @@ def main():
         "checkpoints_path": "./checkpoints"
     }
 
-    model_names = ["resnet", "densenet", "inception"]
+    model_names = ["resnet50", "densenet121", "inception_v3"]
 
     print(f"Starting ensemble model demo...")
     # validation dataset
     val_mass_df = pd.read_csv("./data/processed/mass_case_description_test_set_mapped.csv")
 
-    _, val_transform = apply_transforms("resnet") # for testing
+    _, val_transform = apply_transforms("resnet50") # for testing
     val_mass_dataset = CBISDDSMDataset(val_mass_df, transform=val_transform)
     val_loader = DataLoader(val_mass_dataset, 
                            batch_size=32,
