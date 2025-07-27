@@ -19,8 +19,7 @@ imgNetStd = [0.229, 0.224, 0.225]
 
 def apply_transforms(model_type):
     if model_type in ["resnet50" , "densenet121"]:
-        # img_size = 224
-        img_size = 512
+        img_size = 224
     elif model_type == "inception_v3":
         img_size = 299
     else:
@@ -30,9 +29,7 @@ def apply_transforms(model_type):
         transforms.Resize((img_size,img_size)),
         transforms.Grayscale(num_output_channels=3), 
         transforms.RandomHorizontalFlip(p=0.5),
-        #transforms.RandomVerticalFlip(p=0.3),
         transforms.RandomRotation(10),
-        #transforms.ColorJitter(brightness=0.2, contrast=0.2),
         transforms.ToTensor(),
         transforms.Normalize(mean = imgNetMean, std = imgNetStd)
     ])

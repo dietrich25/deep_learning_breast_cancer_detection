@@ -9,6 +9,8 @@ import pydicom
 import numpy as np
 from PIL import Image
 import cv2
+import pandas as pd
+from sklearn.model_selection import train_test_split
 
 def load_dicom_as_pil_image(file_path: str) -> Image.Image:
     """
@@ -54,6 +56,21 @@ def load_pgm_as_pil_image(file_path: str) -> Image.Image:
     except Exception as e:
         print(f"Failed to load PGM file {file_path}: {e}")
         return None
+
+def load_cbis_ddsm_split(train_df_path: str, 
+                         test_df_path: str, 
+                         val_split_ratio = 0.25, 
+                         random_state = 42):
+    
+    training_df = pd.read_csv(train_df_path)
+    test_df = pd.read_csv(test_df_path)
+
+    train_df, val_df = train_test_split(training_df, 
+                                        test_size=val_split_ratio,
+                                        stratify=training_df["pathology"], 
+                                        random_state=random_state)
+    
+    return train_df, val_df, test_df
 
 
 class CBISDDSMDataset(Dataset):

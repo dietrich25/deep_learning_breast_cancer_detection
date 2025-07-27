@@ -24,18 +24,18 @@ class Earlystopping:
     def __init__(self, patience=5, delta=0):
         self.patience = patience
         self.delta = delta
-        self.best_loss = None
+        self.best_score = None
         self.early_stop = False
         self.counter = 0
 
-    def __call__(self, val_loss):
+    def __call__(self, current_score):
 
-        if self.best_loss is None:
-            self.best_loss = val_loss
+        if self.best_score is None:
+            self.best_score = current_score
             return False
         
-        if val_loss < self.best_loss - self.delta:
-            self.best_loss = val_loss
+        if current_score > self.best_score + self.delta:
+            self.best_score = current_score
             self.counter = 0
             logging.debug(f"EarlyStop counter reseted to: {self.counter}")
         else:
@@ -43,6 +43,152 @@ class Earlystopping:
             logging.debug(f"EarlyStop counter increased to: {self.counter}")
 
         return self.counter >= self.patience
+
+def freeze_classifier(model: torch.nn.Module, model_name:str) -> torch.nn.Module:
+    """ Freeze the classifier layer of the model.
+    Parameters:
+        model(torch.nn.Module): Pytorch model
+        model_name(str): name of the model. 
+            Supported values are 'resnet50', 'densenet121', 'inception_v3'.
+
+    Returns:
+        model(torch.nn.Module): Pytorch model with frozen classifier layer
+    """
+
+    if model_name == "resnet50" or model_name == "inception_v3":
+        for param in model.fc.parmeters():
+            param.requires_grad = False
+    elif model_name == "densenet121":
+        for param in model.classifier.parameters():
+            param.requires_grad = False
+    else:
+        logging.error(f"Invalid model_name passed to freeze_classifier(): {model_name}.")
+        raise ValueError(f"Invalid paramtere passed to freeze_classifier(): {model_name}.")
+    
+    logging.debug(f"Classifier layer frozen for {model_name}.")
+    return model
+
+def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> torch.nn.Module:
+    """
+    Unfreezes a specified number of top blocks in a Pytorch model. 
+
+    Parameters:
+        model(torch.nn.Module): Pytorch model
+        model_name(str): name of the model. 
+            Supported values are 'resnet50', 'densenet121', 'inception_v3'.
+        num_depth: controls the number of top blocks to unfreeze.
+            Supported values:
+                1: Unfreeze the last block
+                2. Unfreeze the last two blocks
+
+    Returns:
+        model(torch.nn.Module): Pytorch model with selected layers unfrozen for training.
+    """
+
+    if num_depth == 1:
+        if model_name == "resnet50":
+            for param in model.layer4.parameters():
+                param.requires_grad = True
+            logging.debug("Resnet50 layer4 unfrozen for training...")
+        elif model_name == "densenet121":
+            for param in model.features.denseblock4.parameters():
+                param.requires_grad = True
+            for param in model.features.norm5.parameters():
+                param.requires_grad = True
+            logging.debug("Densenet121 denseblock4 and norm5 unfrozen for training...")   
+        elif model_name == "inception_v3":
+            for param in model.Mixed_7c.parameters():
+                param.requires_grad = True
+            logging.debug("Inception_V3 mixed_7c unfrozen for training...")
+
+    elif num_depth == 2:
+        if model_name == "resnet50":
+            for param in model.layer3.parameters():
+                param.requires_grad = True
+            for param in model.layer4.parameters():
+                param.requires_grad = True
+            logging.debug("Resnet50 layer4 and layer3 unfrozen for training...")
+        elif model_name == "densenet121":
+            for param in model.features.denseblock3.parameters():
+                param.requires_grad = True
+            for param in model.features.transition3.parameters():
+                param.requires_grad = True
+            for param in model.features.denseblock4.parameters():
+                param.requires_grad = True
+            for param in model.features.norm5.parameters():
+                param.requires_grad = True
+            logging.debug("DenseNet121 denseblock3, transition3, denseblock4, and norm5 unfrozen for training...")
+        elif model_name == "inception_v3":
+            for param in model.Mixed_7b.parameters():
+                param.requires_grad = True
+            for param in model.Mixed_7c.parameters():
+                param.requires_grad = True
+            logging.debug("Inception_V3 mixed_7b and mixed_7c unfrozen for training...")
+    else:
+        logging.error(f"Invalid model training depth {num_depth}. Valid values are 1 or 2.")
+        raise ValueError("Invalid model training depth passed on to unfreeze_layer().")
+
+    return model
+
+def freeze_model_params(model:torch.nn.Module) -> torch.nn.Module:
+    """
+    Freezes all model parameters in a Pytorch module.
+
+    Parameters:
+        model(torch.nn.Module): Pytorch model
+    
+    Returns:
+        model(torch.nn.Module): Pytorch model with all parameters frozen
+    
+    """
+    for param in model.parameters():
+        param.requires_grad = False
+
+    logging.debug("All parameters frozen...")
+    return model
+
+def get_model_parameter_counts(model:torch.nn.Module) -> tuple[int, int]:
+    trainable_params = [param for param in model.parameters() if param.requires_grad]
+    if not trainable_params:
+        logging.error("No trainable parameters in the model.")
+        raise ValueError("No trainable parameter found in the model.")
+    total_param_count = sum(p.numel() for p in model.parameters())
+    trainable_count = sum(p.numel() for p in trainable_params)
+    return total_param_count, trainable_count
+
+def load_model(model_name: str, checkpoint: str, device:torch.device, num_classes:int) -> torch.nn.Module:
+        """
+        Loads a saved model checkpoint and sends it to the specified device.
+
+        Parameters:
+            model_name(str): name of the Pytorch model to load. Supported values: 'resnet50', 'densenet121', 'inception_v3'.
+            checkpoint(str): file path to the checkpoint, that contains the saved model dictionary
+            device(torch.device): Device to load the model to (such as 'cuda' or 'cpu')
+            num_classes(int): Number of output classes
+        
+        Returns:
+            torch.nn.Module: Pytorch model loaded from a checkpoint and sent to device
+        
+        """
+        if model_name == "resnet50":
+            model = models.resnet50(weights=None)
+            model.fc = nn.Linear(model.fc.in_features, num_classes)
+        if model_name == "densenet121":
+            model = models.densenet121(weights=None)
+            model.classifier = nn.Linear(model.classifier.in_features, num_classes)
+        if model_name == "inception_v3":
+            model = models.inception_v3(weights=None)
+            model.aux_logits = False
+            model.fc = nn.Linear(model.fc.in_features, num_classes)
+        
+        # Load checkpoint
+        checkpoint = torch.load(checkpoint, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        logging.debug(f"{model_name} model loaded from checkpoint.")
+        model.to(device)
+        logging.debug(f"Model sent to device {device}.")
+    
+        return model
             
 def train_epoch(model, dataloader, criterion, optimizer, device):
 
@@ -183,55 +329,11 @@ def prepare_model(model_name: str, num_classes: int, training_depth: str) -> tor
         param.requires_grad = True
     logging.debug("Classifier layer unfrozen...")
     
-    # Unfreeze model specific layers for training
-    if training_depth == "last_layer":
-        if model_name == "resnet50":
-            for param in model.layer4.parameters():
-                param.requires_grad = True
-            logging.debug("Resnet50 layer4 unfrozen for training...")
-        elif model_name == "densenet121":
-            for param in model.features.denseblock4.parameters():
-                param.requires_grad = True
-            for param in model.features.norm5.parameters():
-                param.requires_grad = True
-            logging.debug("Densenet121 denseblock4 and norm5 unfrozen for training...")   
-        elif model_name == "inception_v3":
-            for param in model.Mixed_7c.parameters():
-                param.requires_grad = True
-            logging.debug("Inception_V3 mixed_7c unfrozen for training...")
-
-    elif training_depth == "last_2_layers":
-        if model_name == "resnet50":
-            for param in model.layer3.parameters():
-                param.requires_grad = True
-            for param in model.layer4.parameters():
-                param.requires_grad = True
-            logging.debug("Resnet50 layer4 and layer3 unfrozen for training...")
-        elif model_name == "densenet121":
-            for param in model.features.denseblock3.parameters():
-                param.requires_grad = True
-            for param in model.features.transition3.parameters():
-                param.requires_grad = True
-            for param in model.features.denseblock4.parameters():
-                param.requires_grad = True
-            for param in model.features.norm5.parameters():
-                param.requires_grad = True
-            logging.debug("DenseNet121 denseblock3, transition3, denseblock4, and norm5 unfrozen for training...")
-        elif model_name == "inception_v3":
-            for param in model.Mixed_7b.parameters():
-                param.requires_grad = True
-            for param in model.Mixed_7c.parameters():
-                param.requires_grad = True
-            logging.debug("Inception_V3 mixed_7b and mixed_7c unfrozen for training...")
-    else:
-        if training_depth !="classifier_only":
-            logging.error(f"Incorrect parameter passed for model training depth: {training_depth}")
-            raise ValueError(f"Incorrect parameter passed for model training depth: {training_depth}")
-        
     logging.debug(f"Model {model_name} prepared for training...")
     return model
 
 # code adapted from https://docs.pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
+
 def train_model(model_name: str,
                 learning_rate: int,
                 optimizer_name: str,
@@ -260,6 +362,10 @@ def train_model(model_name: str,
 
     model = model.to(device)
     criterion = nn.CrossEntropyLoss()
+
+    total_param_count, trainable_param_count = get_model_parameter_counts(model)
+    logging.info(f"{trainable_param_count} trainable parameters in the model from all model parameters {total_param_count}.")
+
     if optimizer_name == "adam":
         optimizer = optim.Adam(model.parameters(), learning_rate, weight_decay=1e-4)
     elif optimizer_name == "adamw":
@@ -272,7 +378,7 @@ def train_model(model_name: str,
     logging.debug(f"Optimizer {optimizer_name} initialised with {learning_rate} learning rate.")
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-    early_stop = Earlystopping(patience=10, delta=0.01)
+    early_stop = Earlystopping(patience=5, delta=0.01)
     logging.debug("Learning rate scheduler and early stopping initialised.")
 
     history = {
@@ -332,9 +438,109 @@ def train_model(model_name: str,
         
         if early_stop(val_loss):
             logging.warning(f"Early stopping triggered at epoch {epoch + 1}.")
+            break
+    
+    total_time = time.time() - total_start_time
+    logging.info(f"**Training completed. Total time: {total_time/60:.1f} minutes | Best F1-score {val_f1:.4f}")
+
+    return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
+
+def model_training_2_phase(model: torch.nn.Module,
+                    model_name:str,
+                    optimizer_name:str,
+                    device: torch.device, 
+                    classifier_only: bool,
+                    training_depth:int,
+                    learning_rate: int,
+                    train_dataloader: DataLoader,
+                    validation_dataloader: DataLoader,
+                    config: dict):
+    
+    total_start_time = time.time()
+    if classifier_only:
+        logging.debug(f"Initialising classifier training for {model_name}, with optimizer {optimizer_name} and LR: {learning_rate}.")
+    else:
+        logging.debug(f"Initialising backbone training for {model_name}, with optimizer {optimizer_name} and LR: {learning_rate}.")
+
+    model = model.to(device)
+    criterion = nn.CrossEntropyLoss()
+
+    if optimizer_name == "adam":
+        optimizer = optim.Adam(model.parameters(), learning_rate, weight_decay=1e-4)
+    elif optimizer_name == "adamw":
+        optimizer = optim.AdamW(model.parameters(), learning_rate)
+    elif optimizer_name == "sgd":
+        optimizer = optim.SGD(model.parameters(), learning_rate, momentum = 0.9) 
+    else:
+        logging.error(f"Invalid optimizer parameter:{optimizer_name}.")
+        raise ValueError(f"Invalid optimizer selected: {optimizer_name}")
+    logging.debug(f"Optimizer {optimizer_name} initialised with {learning_rate} learning rate.")
+
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    early_stop = Earlystopping(patience=5, delta=0.01)
+    logging.debug("Learning rate scheduler and early stopping initialised.")
+
+    history = {
+        "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
+        "train_loss": [], "train_acc": [],
+        "val_acc": [], "val_loss": [], "val_recall": [], "val_precision": [],
+        "val_f1": [], "val_roc_auc": [], "val_specificity": []
+    }
+
+    best_val_f1 = 0.0 
+    best_model_state_dict = None
+    best_optimizer_state_dict = None
+    best_epoch = 0
+
+    logging.debug(f"Starting training {model_name} on {device} for {config['epochs']} epochs.")
+
+    for epoch in range(config["epochs"]):
+        epoch_start_time = time.time()
+        logging.debug(f"Epoch progress: {epoch+1}/{config['epochs']}")
+
+        train_acc, train_loss = train_epoch(model, train_dataloader,criterion,optimizer,device)
+
+        val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = validate_epoch(model, validation_dataloader, criterion, device)
+
+        epoch_time = time.time() - epoch_start_time
+
+        # Learning rate scheduling
+        old_lr = optimizer.param_groups[0]['lr']
+        scheduler.step(1.0 - val_f1)
+        new_lr = optimizer.param_groups[0]['lr']
+        if old_lr != new_lr:
+            logging.info(f"Learning rate changed from {old_lr:.6f} to {new_lr:.6f}")
+
+        history["model_name"].append(model_name)
+        history["LR"].append(learning_rate)
+        history["training_depth"].append(training_depth)
+        history["optimizer"].append(optimizer_name)
+        history["train_loss"].append(train_loss)
+        history["train_acc"].append(train_acc)
+        history["val_acc"].append(val_acc)
+        history["val_loss"].append(val_loss)
+        history["val_recall"].append(val_recall)
+        history["val_precision"].append(val_precision)
+        history["val_f1"].append(val_f1)
+        history["val_roc_auc"].append(val_roc_auc)
+        history["val_specificity"].append(val_specificity)
+
+        logging.info(f"Epoch {epoch+1}/{config['epochs']} completed in {epoch_time:.1f}s | Val F1: {val_f1:.4f}")
+
+        # Save best model
+        if val_f1 > best_val_f1:
+            best_val_f1 = val_f1
+            best_model_state_dict = model.state_dict()
+            best_optimizer_state_dict = optimizer.state_dict()
+            best_epoch = epoch
+            logging.debug(f"**New best model saved with F1-score: {val_f1:.4f}.**")
+        
+        if early_stop(val_f1):
+            logging.warning(f"Early stopping triggered at epoch {epoch + 1}.")
             return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
     
     total_time = time.time() - total_start_time
     logging.info(f"**Training completed. Total time: {total_time/60:.1f} minutes | Best F1-score {val_f1:.4f}")
     return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
+
 
