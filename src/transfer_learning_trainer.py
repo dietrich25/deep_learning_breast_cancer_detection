@@ -21,7 +21,7 @@ from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_sc
 
 # code adapted from https://www.geeksforgeeks.org/deep-learning/how-to-handle-overfitting-in-pytorch-models-using-early-stopping/
 class Earlystopping:
-    def __init__(self, patience=5, delta=0):
+    def __init__(self, patience=5, delta=0.01):
         self.patience = patience
         self.delta = delta
         self.best_score = None
@@ -56,7 +56,7 @@ def freeze_classifier(model: torch.nn.Module, model_name:str) -> torch.nn.Module
     """
 
     if model_name == "resnet50" or model_name == "inception_v3":
-        for param in model.fc.parmeters():
+        for param in model.fc.parameters():
             param.requires_grad = False
     elif model_name == "densenet121":
         for param in model.classifier.parameters():
@@ -84,8 +84,19 @@ def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> to
     Returns:
         model(torch.nn.Module): Pytorch model with selected layers unfrozen for training.
     """
+    if model_name == "resnet50" or model_name == "inception_v3":
+        for param in model.fc.parameters():
+            param.requires_grad = True
+    elif model_name == "densenet121":
+        for param in model.classifier.parameters():
+            param.requires_grad = True
+    else:
+        logging.error(f"Invalid model_name passed to unfreeze_layer(): {model_name}.")
+        raise ValueError(f"Invalid parameter passed to unfreeze_layer(): {model_name}.")
 
-    if num_depth == 1:
+    if num_depth == 0:
+        pass
+    elif num_depth == 1:
         if model_name == "resnet50":
             for param in model.layer4.parameters():
                 param.requires_grad = True
@@ -125,7 +136,7 @@ def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> to
                 param.requires_grad = True
             logging.debug("Inception_V3 mixed_7b and mixed_7c unfrozen for training...")
     else:
-        logging.error(f"Invalid model training depth {num_depth}. Valid values are 1 or 2.")
+        logging.error(f"Invalid model training depth {num_depth}. Valid values are 0, 1 or 2.")
         raise ValueError("Invalid model training depth passed on to unfreeze_layer().")
 
     return model
@@ -332,8 +343,78 @@ def prepare_model(model_name: str, num_classes: int, training_depth: str) -> tor
     logging.debug(f"Model {model_name} prepared for training...")
     return model
 
+def adjust_optimizer (model: torch.nn.Module,
+                      model_name: str,
+                      optimizer_name: str,
+                      classifier_lr: float,
+                      backbone_lr: float,
+                      training_depth: int) -> torch.nn.Module:
+    
+    # Separate parameters
+    classifier_params = []
+    backbone_params = []
+    
+    if model_name == "resnet50":
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                if "fc" in name:
+                    classifier_params.append(param)
+                else:
+                    backbone_params.append(param)
+    
+    elif model_name == "densenet121":
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                if "classifier" in name:
+                    classifier_params.append(param)
+                else:
+                    backbone_params.append(param)
+    
+    elif model_name == "inception_v3":
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                if "fc" in name:
+                    classifier_params.append(param)
+                else:
+                    backbone_params.append(param)
+    
+    # Group parameters for different learning rates
+    param_groups = []
+    
+    # classifier lr to be reduced during backbone training
+    if classifier_params:
+        param_groups.append({
+            'params': classifier_params,
+            'lr': classifier_lr * 0.1,  
+            'name': 'classifier'
+        })
+    
+    if backbone_params:
+        param_groups.append({
+            'params': backbone_params,
+            'lr': backbone_lr,
+            'name': 'backbone'
+        })
+    
+    # Create optimizer with parameter groups
+    if optimizer_name == "adam":
+        optimizer = optim.Adam(param_groups, weight_decay=1e-4)
+    elif optimizer_name == "adamw":
+        optimizer = optim.AdamW(param_groups)
+    elif optimizer_name == "sgd":
+        optimizer = optim.SGD(param_groups, momentum=0.9)
+    else:
+        logging.error(f"Invalid optimizer: {optimizer_name}")
+        raise ValueError(f"Invalid optimizer: {optimizer_name}")
+    
+    logging.info(f"Created {optimizer_name} with adjusted learning rate per parameter group.")
+
+    return optimizer
+
+
 # code adapted from https://docs.pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
 
+"""
 def train_model(model_name: str,
                 learning_rate: int,
                 optimizer_name: str,
@@ -343,8 +424,9 @@ def train_model(model_name: str,
                 train_dataloader: DataLoader,
                 validation_dataloader: DataLoader,
                 config: dict):
-    """
+
     Trains a Pytorch model using a specific training and validation data loader.
+
 
     Args:
         model_name(str): Name of the model used ("resnet", "densenet", "inception")
@@ -356,7 +438,7 @@ def train_model(model_name: str,
     Returns:
         history(dict): Dictionary containing the training and validation losses and accuracies. 
     """
-
+"""
     total_start_time = time.time()
     logging.debug(f"**Initialising training for {model_name} with LR={learning_rate}, optimizer={optimizer_name}, depth={training_depth}.")
 
@@ -378,7 +460,7 @@ def train_model(model_name: str,
     logging.debug(f"Optimizer {optimizer_name} initialised with {learning_rate} learning rate.")
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-    early_stop = Earlystopping(patience=5, delta=0.01)
+    early_stop = Earlystopping(patience=7, delta=0.01)
     logging.debug("Learning rate scheduler and early stopping initialised.")
 
     history = {
@@ -444,7 +526,222 @@ def train_model(model_name: str,
     logging.info(f"**Training completed. Total time: {total_time/60:.1f} minutes | Best F1-score {val_f1:.4f}")
 
     return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
+"""
 
+def train_model_phase(model: torch.nn.Module,
+                model_name:str,
+                phase: str,
+                learning_rate: float,
+                optimizer:torch.optim.Optimizer,
+                criterion: torch.nn.Module,
+                train_dataloader: DataLoader,
+                validation_dataloader: DataLoader,
+                config: dict) -> tuple:
+    
+    total_start_time = time.time()
+    logging.debug(f"Initialising {phase} phase training for {model_name}...")
+
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    early_stop = Earlystopping(patience=7, delta=0.01)
+    logging.debug("Learning rate scheduler and early stopping initialised.")
+
+    history = {
+        "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
+        "train_loss": [], "train_acc": [],
+        "val_acc": [], "val_loss": [], "val_recall": [], "val_precision": [],
+        "val_f1": [], "val_roc_auc": [], "val_specificity": []
+    }
+
+    best_f1 = 0.0
+    best_model_state_dict = None
+    best_metrics = {}
+
+    for epoch in range(config["epochs"]):
+        epoch_start_time = time.time()
+        logging.debug(f"Epoch progress: {epoch+1}/{config['epochs']}")
+
+        train_acc, train_loss = train_epoch(model, train_dataloader,criterion,optimizer,config["device"])
+
+        val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = validate_epoch(model, validation_dataloader, criterion, config["device"])
+
+        epoch_time = time.time() - epoch_start_time
+
+        history["model_name"].append(model_name)
+        history["LR"].append(learning_rate)
+        history["training_depth"].append(phase)
+        history["optimizer"].append(type(optimizer).__name__)
+        history["train_loss"].append(train_loss)
+        history["train_acc"].append(train_acc)
+        history["val_acc"].append(val_acc)
+        history["val_loss"].append(val_loss)
+        history["val_recall"].append(val_recall)
+        history["val_precision"].append(val_precision)
+        history["val_f1"].append(val_f1)
+        history["val_roc_auc"].append(val_roc_auc)
+        history["val_specificity"].append(val_specificity)
+
+        # Learning rate scheduling
+        old_lr = optimizer.param_groups[0]['lr']
+        scheduler.step(1.0 - val_f1)
+        new_lr = optimizer.param_groups[0]['lr']
+        if old_lr != new_lr:
+            logging.info(f"Learning rate changed from {old_lr:.6f} to {new_lr:.6f}")
+
+        logging.info(f"Epoch {epoch+1}/{config['epochs']} completed in {epoch_time:.1f}s | Val F1: {val_f1:.4f}")
+
+        # Save best model
+        if val_f1 > best_f1:
+            best_f1 = val_f1
+            best_model_state_dict = model.state_dict().copy()
+            best_metrics = {
+                "epoch": epoch,
+                "f1": val_f1,
+                "accuracy": val_acc,
+                "recall": val_recall,
+                "precision": val_precision,
+                "roc_auc": val_roc_auc,
+                "specificity": val_specificity
+            }
+            logging.debug(f"**New best model saved with F1-score: {val_f1:.4f}.**")
+        
+        if early_stop(val_f1):
+            logging.warning(f"Early stopping triggered at epoch {epoch + 1}.")
+            break
+    
+    total_time = time.time() - total_start_time
+    logging.info(f"Training phase {phase} completed. Total time: {total_time/60:.1f} minutes | Best F1-score {val_f1:.4f}")
+
+    return history, best_model_state_dict, best_metrics
+
+def progressive_model_training(model_name: str,
+                            classifier_lr: float,
+                            backbone_lr: float,
+                            optimizer_name: str,
+                            training_depth: int,
+                            train_loader: DataLoader,
+                            val_loader: DataLoader,
+                            config: dict,
+                            class_weigths: torch.FloatTensor):
+            
+    prog_start_time = time.time()
+    logging.info(f"***Initialising progress model training for {model_name}***")
+    logging.info(f"Classifier LR: {classifier_lr} | Backbone LR: {backbone_lr}")
+    logging.info(f"Optimizer: {optimizer_name} | Training Depth: {training_depth}")
+
+    # Record training and validation results
+    full_history = {
+        "phase": [],
+        "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
+        "train_loss": [], "train_acc": [],
+        "val_acc": [], "val_loss": [], "val_recall": [], "val_precision": [],
+        "val_f1": [], "val_roc_auc": [], "val_specificity": []
+    }
+
+    # General performance trackers
+    overall_best_f1 = 0.0
+    overall_best_state = None
+    overall_best_metrics = {}
+
+    ### Phase 1 - Replace and train classifier layer ####
+    logging.info("**Phase 1: Classifier layer training**")
+
+    # Load model with pre-trained weights and replaced, unfrozen classifier
+    model = prepare_model(model_name, config["num_classes"], "classifier_only")
+    model = model.to(config["device"])
+    # Set model to training state
+    model.train()
+    logging.debug("Model training mode activated...")
+
+
+    # Initialise loss function
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weigths)
+
+    # Initialise optimizer
+    if optimizer_name == "adam":
+        optimizer = optim.Adam(model.parameters(), lr=classifier_lr, weight_decay=1e-4)
+    elif optimizer_name == "adamw":
+        optimizer = optim.AdamW(model.parameters(), lr=classifier_lr, weight_decay=1e-4)
+    elif optimizer_name == "sgd":
+        optimizer = optim.SGD(model.parameters(), lr=classifier_lr, momentum=0.9)
+    else:
+        logging.error(f"Invalid optimizer passed to progressive_model_training(): {optimizer_name}")
+        raise ValueError(f"Invalid optimizer: {optimizer_name}")
+            
+    phase1_history, phase1_best_state, phase1_best_metrics = train_model_phase(
+        model=model,
+        model_name=model_name,
+        phase="classifier",
+        learning_rate = classifier_lr,
+        optimizer=optimizer,
+        criterion=criterion,
+        train_dataloader=train_loader,
+        validation_dataloader=val_loader,
+        config=config
+    )
+
+    # Append training history
+    for key in phase1_history:
+        if key == "phase":
+            full_history[key].extend(["classifier"] * len(phase1_history["train_loss"]))
+        elif key in full_history:
+            full_history[key].extend(phase1_history[key])
+
+    # Update best performance trackers
+    if phase1_best_metrics["f1"] > overall_best_f1:
+        overall_best_f1 = phase1_best_metrics["f1"]
+        overall_best_state = phase1_best_state
+        overall_best_metrics = phase1_best_metrics
+        overall_best_metrics["phase"] = "classifier"
+
+    if training_depth > 0:
+        logging.info("**Phase 2: Progressive backbone training**")
+
+        model = unfreeze_layer(model, model_name, training_depth)
+
+        # Adjust learning rates for the training depth
+        optimizer = adjust_optimizer(model=model,
+            model_name=model_name,
+            optimizer_name=optimizer_name,
+            classifier_lr=classifier_lr, 
+            backbone_lr=backbone_lr,
+            training_depth=training_depth
+        )
+
+        phase2_history, phase2_best_state, phase2_best_metrics = train_model_phase(
+            model=model,
+            model_name=model_name,
+            phase=f"backbone_{training_depth}",
+            learning_rate = classifier_lr,
+            optimizer=optimizer,
+            criterion=criterion,
+            train_dataloader=train_loader,
+            validation_dataloader=val_loader,
+            config=config
+        )
+
+        # Update history
+        for key in phase2_history:
+            if key == "phase":
+                full_history[key].extend([f"backbone_{training_depth}"] * len(phase2_history["train_loss"]))
+            elif key in full_history:
+                full_history[key].extend(phase2_history[key])
+        
+        # Update performance trackers
+        if phase2_best_metrics["f1"] > overall_best_f1:
+            overall_best_f1 = phase2_best_metrics["f1"]
+            overall_best_state = phase2_best_state
+            overall_best_metrics = phase2_best_metrics
+            overall_best_metrics["phase"] = f"backbone_depth_{training_depth}"
+        
+        prog_end_time = time.time()
+        total_time = prog_end_time - prog_start_time
+        logging.info(f"***Progressive model training finished in {total_time/60:.1f} minutes. Best F1: {overall_best_f1}***")
+
+    return full_history, overall_best_state, overall_best_metrics
+
+
+
+"""
 def model_training_2_phase(model: torch.nn.Module,
                     model_name:str,
                     optimizer_name:str,
@@ -456,6 +753,7 @@ def model_training_2_phase(model: torch.nn.Module,
                     validation_dataloader: DataLoader,
                     config: dict):
     
+    model.train()
     total_start_time = time.time()
     if classifier_only:
         logging.debug(f"Initialising classifier training for {model_name}, with optimizer {optimizer_name} and LR: {learning_rate}.")
@@ -476,8 +774,12 @@ def model_training_2_phase(model: torch.nn.Module,
         raise ValueError(f"Invalid optimizer selected: {optimizer_name}")
     logging.debug(f"Optimizer {optimizer_name} initialised with {learning_rate} learning rate.")
 
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-    early_stop = Earlystopping(patience=5, delta=0.01)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 
+                                                     mode='max', 
+                                                     factor=0.5, 
+                                                     patience=5, 
+                                                     min_lr=1e7)
+    early_stop = Earlystopping(patience=7, delta=0.01)
     logging.debug("Learning rate scheduler and early stopping initialised.")
 
     history = {
@@ -506,7 +808,7 @@ def model_training_2_phase(model: torch.nn.Module,
 
         # Learning rate scheduling
         old_lr = optimizer.param_groups[0]['lr']
-        scheduler.step(1.0 - val_f1)
+        scheduler.step(val_f1)
         new_lr = optimizer.param_groups[0]['lr']
         if old_lr != new_lr:
             logging.info(f"Learning rate changed from {old_lr:.6f} to {new_lr:.6f}")
@@ -542,5 +844,5 @@ def model_training_2_phase(model: torch.nn.Module,
     total_time = time.time() - total_start_time
     logging.info(f"**Training completed. Total time: {total_time/60:.1f} minutes | Best F1-score {val_f1:.4f}")
     return history, best_model_state_dict, best_optimizer_state_dict, best_epoch, best_val_f1
-
+"""
 

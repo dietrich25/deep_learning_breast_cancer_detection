@@ -7,10 +7,14 @@ from torch.utils.data import Dataset
 import os
 import pydicom
 import numpy as np
+import torch
 from PIL import Image
 import cv2
 import pandas as pd
 from sklearn.model_selection import train_test_split
+import logging
+from collections import Counter
+from sklearn.utils.class_weight import compute_class_weight
 
 def load_dicom_as_pil_image(file_path: str) -> Image.Image:
     """
@@ -26,13 +30,15 @@ def load_dicom_as_pil_image(file_path: str) -> Image.Image:
         dcm = pydicom.dcmread(file_path)
         img_array = dcm.pixel_array.astype(np.float32)
         # Normalise values to 0-255 range
-
+        img_array = (img_array - img_array.min()) / (img_array.max() - img_array.min()) * 255.0
+        img_array = img_array.astype(np.uint8)
 
         img = Image.fromarray(img_array)
 
         return img.convert("RGB") # models expect 3 channels
 
     except Exception as e:
+        logging.error(f"Failed to load DICOM file {file_path}: {e}")
         print(f"Failed to load DICOM file {file_path}: {e}")
         return None
 
@@ -54,6 +60,7 @@ def load_pgm_as_pil_image(file_path: str) -> Image.Image:
         return img
     
     except Exception as e:
+        logging.error(f"Failed to load PGM file {file_path}: {e}")
         print(f"Failed to load PGM file {file_path}: {e}")
         return None
 
@@ -61,6 +68,21 @@ def load_cbis_ddsm_split(train_df_path: str,
                          test_df_path: str, 
                          val_split_ratio = 0.25, 
                          random_state = 42):
+    """
+    Load CBIS-DDSM datasets and create stratified (by pathology) train/validation/test splits.
+
+    Parameters:
+        train_df_path(str): Path to the csv file containing metadata about the CBIS-DDSM official training set
+        test_df_path(str): Path to the csv file containing metadata about the CBIS-DDSM official test set
+        val_split_ratio(float): proportion of the training dataset to use for validation (0.0 - 1.0)
+        random_state(int): Random seed to make dataset split reproducible
+
+    Returns:
+        tuple(train_df, val_df, test_df):
+        - train_df(Dataframe): training subset after stratified split
+        - val_df(Dataframe): validation subset after stratified split
+        - test_df(Dataframe): official CBIS-DDSM test dataset
+    """
     
     training_df = pd.read_csv(train_df_path)
     test_df = pd.read_csv(test_df_path)
@@ -70,7 +92,61 @@ def load_cbis_ddsm_split(train_df_path: str,
                                         stratify=training_df["pathology"], 
                                         random_state=random_state)
     
+    # Class distribution in the training dataset
+    logging.info(f"CBIS-DDSM official training dataset content: {len(training_df)} cases.")
+    train_class_counts = Counter(training_df["pathology"])
+    for pathology, count in sorted(train_class_counts.items()):
+        perc = (count/len(training_df)) * 100
+        logging.info(f"Training dataset class distribution: Pathology: {pathology} | Count: {count} | Percentage: {perc:.1f}%")
+
+    # Class distribution in the training stratified split
+    logging.info(f"CBIS-DDSM training subset content: {len(train_df)} cases.")
+    sub_train_class_counts = Counter(train_df["pathology"])
+    for pathology, count in sorted(sub_train_class_counts.items()):
+        perc = (count/len(train_df)) * 100
+        logging.info(f"Training subset class distribution: Pathology: {pathology} | Count: {count} | Percentage: {perc:.1f}%")
+    
+    # Class distribution in the validation stratified split
+    logging.info(f"CBIS-DDSM training subset content: {len(val_df)} cases.")
+    val_class_counts = Counter(val_df["pathology"])
+    for pathology, count in sorted(val_class_counts.items()):
+        perc = (count/len(val_df)) * 100
+        logging.info(f"Validation subset class distribution: Pathology: {pathology} | Count: {count} | Percentage: {perc:.1f}%")
+    
     return train_df, val_df, test_df
+
+def get_dataset_labels(df):
+    """Get the pathology labels from the CBIS-DDSM cases."""
+    label_map = {
+        "BENIGN": 0,
+        "BENIGN_WITHOUT_CALLBACK": 0,
+        "MALIGNANT": 1
+    }
+
+    labels = []
+    for _, row in df.iterrows():
+        label_str = row["pathology"]
+        label = label_map.get(label_str, -1)
+        if label != -1:
+            labels.append(label)
+    
+    return labels
+
+def balance_cbis_ddsm_class_weights(dataset_labels, device):
+    
+    class_counts = Counter(dataset_labels)
+    unique_classes = sorted(class_counts.keys())
+
+    class_weights = compute_class_weight("balanced",
+                                         classes = np.array(unique_classes),
+                                         y = dataset_labels)
+    
+    # convert to tensors
+    weight_tensor = torch.FloatTensor(class_weights).to(device)
+
+    return weight_tensor
+
+
 
 
 class CBISDDSMDataset(Dataset):
@@ -87,11 +163,9 @@ class CBISDDSMDataset(Dataset):
         return len(self.data)
     
     def __getitem__(self,idx):
-        #cropped_img_path = os.path.normpath(self.data.loc[idx, "cropped image file path"])
         img_path = os.path.normpath(self.data.loc[idx, "image file path"])
 
         # read dicom images
-        #cropped_img = load_dicom_as_pil_image(cropped_img_path)
         img = load_dicom_as_pil_image(img_path)
 
         # get and map the label
@@ -100,10 +174,8 @@ class CBISDDSMDataset(Dataset):
 
         # apply transformation
         if self.transform:
-            #cropped_img = self.transform(cropped_img)
             img = self.transform(img)
 
-        # return image and label
         return img, label
 
 class MIASDataset(Dataset):
