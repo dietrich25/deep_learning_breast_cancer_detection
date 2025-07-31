@@ -12,6 +12,8 @@ from datasets import CBISDDSMDataset
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import os
+from evaluation import evaluate_model_performance
+from utils import setup_logging
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -101,10 +103,21 @@ def main():
         "batch_size": 32,
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-        "checkpoints_path": "./checkpoints"
+        "checkpoints_path": "./checkpoints",
+        "logs_path": "./logs"
     }
 
+    log_path = os.path.join(config["logs_path"], f"ensemble_test.log")
+    setup_logging(log_path)
+
     model_names = ["resnet50", "densenet121", "inception_v3"]
+
+    results = {
+        "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
+        "train_loss": [], "train_acc": [],
+        "val_acc": [], "val_loss": [], "val_recall": [], "val_precision": [],
+        "val_f1": [], "val_roc_auc": [], "val_specificity": []
+    }
 
     print(f"Starting ensemble model demo...")
     # validation dataset
@@ -132,18 +145,20 @@ def main():
     print(f"\nEnsemble model set...")
     ensemble.to(config["device"])
 
+    criterion = torch.nn.CrossEntropyLoss()
+
     print("\nTesting ensemble on validation set...")
-    eval_loss, eval_acc = evaluate_ensemble(ensemble, val_loader, config["device"])
+    val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = evaluate_model_performance(ensemble, val_loader, criterion, config["device"])
 
-    print(f"Evaluation Loss: {eval_loss:.2f}")
-    print(f"Evaluation Accuracy: {eval_acc:.2f}")
 
-    results = {
-        'eval_loss': eval_loss,
-        'eval_acc': eval_acc,
-        'num_models': len(models),
-        'model_names': model_names[:len(models)]
-    }
+    results["model_name"].append("ensemble")
+    results["val_acc"].append(val_acc)
+    results["val_loss"].append(val_loss)
+    results["val_recall"].append(val_recall)
+    results["val_precision"].append(val_precision)
+    results["val_f1"].append(val_f1)
+    results["val_roc_auc"].append(val_roc_auc)
+    results["val_specificity"].append(val_specificity)
     
     torch.save(results, 'ensemble_evaluation_results.pth')
     print(f"\nResults saved to 'ensemble_evaluation_results.pth'")
