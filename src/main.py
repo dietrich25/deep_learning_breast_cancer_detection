@@ -18,8 +18,8 @@ import multiprocessing
 
 def main():
 
-    run_training = False
-    run_validation = True
+    run_training = True
+    run_validation = False
 
     workflow_start_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -43,10 +43,10 @@ def main():
     logging.info("----- Transfer learning ML workflow started -----")
     
     ### Model training main parameters ####
-    Models = ["resnet50", "densenet121", "inception_v3"] 
-    classifier_lr = [1e-4]
-    backbone_lr = [1e-6]
-    Optimizers = ["adam", "adamw", "sgd"]
+    Models = ["resnet50"]#, "densenet121", "inception_v3"] 
+    classifier_lr = [1e-3]
+    backbone_lr = [1e-5]
+    Optimizers = ["adam"]#, "adamw", "sgd"]
     Depth = [1] 
 
     ### Result trackers ###
@@ -95,13 +95,13 @@ def main():
             train_loader = DataLoader(train_dataset, 
                                     batch_size=config["batch_size"],
                                     shuffle=True,
-                                    num_workers=12,
+                                    num_workers=10,
                                     pin_memory=True)
             
             val_loader = DataLoader(val_dataset, 
                                     batch_size=config["batch_size"],
                                     shuffle=False,
-                                    num_workers=12,
+                                    num_workers=10,
                                     pin_memory=True)
 
             ### Store best performing model constellation ###

@@ -152,7 +152,7 @@ def train_model_phase(model: torch.nn.Module,
     logging.debug(f"Initialising {phase} phase training for {model_name}...")
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-    early_stop = Earlystopping(patience=7, delta=0.01)
+    early_stop = Earlystopping(patience=10, delta=0.005)
 
     history = {
         "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
@@ -163,6 +163,7 @@ def train_model_phase(model: torch.nn.Module,
 
     best_f1 = 0.0
     best_model_state_dict = None
+    best_optimizer_state_dict = None
     best_metrics = {}
 
     for epoch in range(config["epochs"]):
@@ -202,6 +203,7 @@ def train_model_phase(model: torch.nn.Module,
         if val_f1 > best_f1:
             best_f1 = val_f1
             best_model_state_dict = model.state_dict().copy()
+            best_optimizer_state_dict = optimizer.state_dict().copy()
             best_metrics = {
                 "epoch": epoch,
                 "f1": val_f1,
@@ -220,7 +222,7 @@ def train_model_phase(model: torch.nn.Module,
     total_time = time.time() - total_start_time
     logging.info(f"Training phase {phase} completed. Total time: {total_time/60:.1f} minutes | Best F1-score {val_f1:.4f}")
 
-    return history, best_model_state_dict, best_metrics
+    return history, best_model_state_dict, best_optimizer_state_dict, best_metrics
 
 def progressive_model_training(model_name: str,
                             classifier_lr: float,
@@ -273,7 +275,7 @@ def progressive_model_training(model_name: str,
         logging.error(f"Invalid optimizer passed to progressive_model_training(): {optimizer_name}")
         raise ValueError(f"Invalid optimizer: {optimizer_name}")
             
-    phase1_history, phase1_best_state, phase1_best_metrics = train_model_phase(
+    phase1_history, phase1_best_state, phase1_best_optimizer_state, phase1_best_metrics = train_model_phase(
         model=model,
         model_name=model_name,
         phase="classifier",
@@ -299,19 +301,29 @@ def progressive_model_training(model_name: str,
         overall_best_metrics = phase1_best_metrics
         overall_best_metrics["phase"] = "classifier"
 
-    if training_depth > 0:
-        logging.info("-- Phase 2: Progressive backbone training --")
-
+    if training_depth > 0 and phase1_best_state is not None:
+        try:
+            model.load_state_dict(phase1_best_state)
+        except Exception as e:
+            logging.error(f"Failed to load previous best model state: {e}")
+            pass
         model = unfreeze_layer(model, model_name, training_depth)
 
-        # Adjust learning rates for the training depth
-        optimizer = adjust_optimizer(model=model,
-            model_name=model_name,
-            optimizer_name=optimizer_name,
-            classifier_lr=classifier_lr, 
-            backbone_lr=backbone_lr
-        )
+        if training_depth == 1:
+            try:
+                optimizer.load_state_dict(phase1_best_optimizer_state)
+            except Exception as e:
+                logging.error(f"Failed to load previous best optimizer state: {e}")
 
+            # Adjust learning rates for the training depth
+            optimizer = adjust_optimizer(model=model,
+                model_name=model_name,
+                optimizer_name=optimizer_name,
+                classifier_lr=classifier_lr, 
+                backbone_lr=backbone_lr
+            )
+
+        logging.info("-- Phase 2: Progressive backbone training --")
         phase2_history, phase2_best_state, phase2_best_metrics = train_model_phase(
             model=model,
             model_name=model_name,
