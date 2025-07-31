@@ -72,7 +72,7 @@ def adjust_optimizer(model: torch.nn.Module,
     if classifier_params:
         param_groups.append({
             'params': classifier_params,
-            'lr': classifier_lr * 0.1,  
+            'lr': classifier_lr * 0.5,  
             'name': 'classifier'
         })
     
@@ -85,11 +85,11 @@ def adjust_optimizer(model: torch.nn.Module,
     
     # Create optimizer with parameter groups
     if optimizer_name == "adam":
-        optimizer = optim.Adam(param_groups, weight_decay=1e-4)
+        optimizer = optim.Adam(param_groups, weight_decay=1e-5, betas=(0.9, 0.999))
     elif optimizer_name == "adamw":
-        optimizer = optim.AdamW(param_groups)
+        optimizer = optim.AdamW(param_groups, weight_decay=0.01)
     elif optimizer_name == "sgd":
-        optimizer = optim.SGD(param_groups, momentum=0.9)
+        optimizer = optim.SGD(param_groups, momentum=0.9, weight_decay=1e-5, nesterov=True)
     else:
         logging.error(f"Invalid optimizer: {optimizer_name}")
         raise ValueError(f"Invalid optimizer: {optimizer_name}")
