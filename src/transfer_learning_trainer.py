@@ -191,7 +191,7 @@ def train_model_phase(model: torch.nn.Module,
 
         # Learning rate scheduling
         old_lr = optimizer.param_groups[0]['lr']
-        scheduler.step(1.0 - val_f1)
+        scheduler.step(val_f1)
         new_lr = optimizer.param_groups[0]['lr']
         if old_lr != new_lr:
             logging.info(f"Learning rate changed from {old_lr:.6f} to {new_lr:.6f}")
@@ -264,11 +264,11 @@ def progressive_model_training(model_name: str,
 
     # Initialise optimizer
     if optimizer_name == "adam":
-        optimizer = optim.Adam(model.parameters(), lr=classifier_lr, weight_decay=1e-4)
+        optimizer = optim.Adam(model.parameters(), lr=classifier_lr, weight_decay=1e-5, betas=(0.9, 0.999))
     elif optimizer_name == "adamw":
-        optimizer = optim.AdamW(model.parameters(), lr=classifier_lr, weight_decay=1e-4)
+        optimizer = optim.AdamW(model.parameters(), lr=classifier_lr, weight_decay=0.01)
     elif optimizer_name == "sgd":
-        optimizer = optim.SGD(model.parameters(), lr=classifier_lr, momentum=0.9)
+        optimizer = optim.SGD(model.parameters(), lr=classifier_lr, momentum=0.9, weight_decay=1e-5, nesterov=True)
     else:
         logging.error(f"Invalid optimizer passed to progressive_model_training(): {optimizer_name}")
         raise ValueError(f"Invalid optimizer: {optimizer_name}")
