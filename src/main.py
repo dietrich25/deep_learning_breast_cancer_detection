@@ -18,14 +18,14 @@ import multiprocessing
 
 def main():
 
-    run_training = True
-    run_validation = False
+    run_training = False
+    run_validation = True
 
     workflow_start_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     config = {
         "batch_size": 32,
-        "epochs": 50,
+        "epochs": 1,
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         "checkpoints": "./checkpoints",
@@ -43,10 +43,10 @@ def main():
     logging.info("----- Transfer learning ML workflow started -----")
     
     ### Model training main parameters ####
-    Models = ["resnet50"]#, "densenet121", "inception_v3"] 
-    classifier_lr = [1e-3]
+    Models = ["inception_v3"] 
+    classifier_lr = [1e-4]
     backbone_lr = [1e-5]
-    Optimizers = ["adam"]#, "adamw", "sgd"]
+    Optimizers = ["adamw"]
     Depth = [1] 
 
     ### Result trackers ###

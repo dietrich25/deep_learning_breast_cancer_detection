@@ -141,6 +141,8 @@ def balance_cbis_ddsm_class_weights(dataset_labels, device):
                                          classes = np.array(unique_classes),
                                          y = dataset_labels)
     
+    logging.debug(f"Class weights: {class_weights}")
+
     # convert to tensors
     weight_tensor = torch.FloatTensor(class_weights).to(device)
 

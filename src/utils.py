@@ -87,7 +87,7 @@ def adjust_optimizer(model: torch.nn.Module,
     if optimizer_name == "adam":
         optimizer = optim.Adam(param_groups, weight_decay=1e-5, betas=(0.9, 0.999))
     elif optimizer_name == "adamw":
-        optimizer = optim.AdamW(param_groups, weight_decay=0.01)
+        optimizer = optim.AdamW(param_groups, weight_decay=0.05)
     elif optimizer_name == "sgd":
         optimizer = optim.SGD(param_groups, momentum=0.9, weight_decay=1e-5, nesterov=True)
     else:
@@ -97,6 +97,39 @@ def adjust_optimizer(model: torch.nn.Module,
     logging.info(f"Created {optimizer_name} with adjusted learning rate per parameter group.")
 
     return optimizer
+
+def optimizer_add_new_params(optimizer: torch.optim.Optimizer,
+                            model: torch.nn.Module,
+                            model_name: str,
+                            classifier_lr: float,
+                            backbone_lr: float) -> torch.optim.Optimizer:
+    
+    original_dict = optimizer.state_dict()
+
+    # Identify new parameters that need to be added
+    existing_params = {id(p) for group in optimizer.param_groups for p in group['params']}
+    all_trainable_params = {id(p) for p in model.parameters() if p.requires_grad}
+    new_param_ids = all_trainable_params - existing_params
+    
+    if new_param_ids:
+        new_params = [p for p in model.parameters() if id(p) in new_param_ids]
+        
+        # Add new trainable parameters
+        optimizer.add_param_group({
+            'params': new_params,
+            'lr': backbone_lr,
+            'name': 'newly_unfrozen'
+        })
+        logging.info(f"Added {len(new_params)} new parameters to the optimizer")
+        
+        # Adjust existing learning rates for second phase
+        for group in optimizer.param_groups:
+            if group.get('name') == 'classifier' or 'fc' in str(group.get('params', [])):
+                group['lr'] = classifier_lr * 0.5  
+                logging.info(f"Reduced classifier learning rate to {group['lr']}")
+    
+    return optimizer
+
 
 def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> torch.nn.Module:
     """
@@ -202,14 +235,23 @@ def load_model(model_name: str, checkpoint: str, device:torch.device, num_classe
     """
     if model_name == "resnet50":
         model = models.resnet50(weights=None)
-        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        in_features = model.fc.in_features
+        model.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(in_features, num_classes))
     if model_name == "densenet121":
         model = models.densenet121(weights=None)
-        model.classifier = nn.Linear(model.classifier.in_features, num_classes)
+        in_features = model.classifier.in_features
+        model.classifier = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(in_features, num_classes))
     if model_name == "inception_v3":
         model = models.inception_v3(weights=None)
         model.aux_logits = False
-        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        in_features = model.fc.in_features
+        model.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(in_features, num_classes))
         
     # Load checkpoint
     checkpoint = torch.load(checkpoint, map_location=device)

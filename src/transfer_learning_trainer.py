@@ -15,7 +15,7 @@ import torch.nn as nn
 import torchvision.models as models
 import logging
 import time
-from utils import unfreeze_layer, adjust_optimizer
+from utils import unfreeze_layer, adjust_optimizer, optimizer_add_new_params
 from evaluation import evaluate_model_performance
 # freeze_model_params, get_model_parameter_counts, load_model,
 
@@ -125,7 +125,18 @@ def prepare_model(model_name: str, num_classes: int, training_depth: str) -> tor
     # Replace classifier
     classifier = getattr(model, classifier_name)
     in_features = classifier.in_features
-    setattr(model, classifier_name, nn.Linear(in_features, num_classes))
+    #setattr(model, classifier_name, nn.Linear(in_features, num_classes))
+    # Add dropout
+    if model_name == "resnet50" or model_name == "inception_v3":
+        model.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(in_features, num_classes)
+        )
+    elif model_name == "densenet121":
+        model.classifier = nn.Sequential(
+        nn.Dropout(0.5),
+        nn.Linear(in_features, num_classes)
+        )
     logging.debug(f"Classifier replaced from {in_features} to {num_classes} features.")
 
     # Unfreeze classifier layer
@@ -151,7 +162,7 @@ def train_model_phase(model: torch.nn.Module,
     total_start_time = time.time()
     logging.debug(f"Initialising {phase} phase training for {model_name}...")
 
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=7)
     early_stop = Earlystopping(patience=10, delta=0.005)
 
     history = {
@@ -268,7 +279,7 @@ def progressive_model_training(model_name: str,
     if optimizer_name == "adam":
         optimizer = optim.Adam(model.parameters(), lr=classifier_lr, weight_decay=1e-5, betas=(0.9, 0.999))
     elif optimizer_name == "adamw":
-        optimizer = optim.AdamW(model.parameters(), lr=classifier_lr, weight_decay=0.01)
+        optimizer = optim.AdamW(model.parameters(), lr=classifier_lr, weight_decay=0.05)
     elif optimizer_name == "sgd":
         optimizer = optim.SGD(model.parameters(), lr=classifier_lr, momentum=0.9, weight_decay=1e-5, nesterov=True)
     else:
@@ -304,18 +315,21 @@ def progressive_model_training(model_name: str,
     if training_depth > 0 and phase1_best_state is not None:
         try:
             model.load_state_dict(phase1_best_state)
+            logging.info("Best performing model state passed to phase 2.")
         except Exception as e:
             logging.error(f"Failed to load previous best model state: {e}")
-            pass
+            raise RuntimeError("Failed to load previous best model state") from e
         model = unfreeze_layer(model, model_name, training_depth)
 
         if training_depth == 1:
             try:
                 optimizer.load_state_dict(phase1_best_optimizer_state)
+                optimizer = optimizer_add_new_params(optimizer, model, model_name, classifier_lr, backbone_lr)
             except Exception as e:
-                logging.error(f"Failed to load previous best optimizer state: {e}")
-
-            # Adjust learning rates for the training depth
+                logging.error(f"Failed to load and adjust previous best optimizer state: {e}")
+                raise RuntimeError("Failed to load and adjust previous best optimizer state") from e
+        else:
+            # Initialise new optimizer with adjusted learning rates
             optimizer = adjust_optimizer(model=model,
                 model_name=model_name,
                 optimizer_name=optimizer_name,
@@ -324,7 +338,7 @@ def progressive_model_training(model_name: str,
             )
 
         logging.info("-- Phase 2: Progressive backbone training --")
-        phase2_history, phase2_best_state, phase2_best_metrics = train_model_phase(
+        phase2_history, phase2_best_state, phase2_best_optimizer_state, phase2_best_metrics = train_model_phase(
             model=model,
             model_name=model_name,
             phase=f"backbone_{training_depth}",
@@ -350,8 +364,8 @@ def progressive_model_training(model_name: str,
             overall_best_metrics = phase2_best_metrics
             overall_best_metrics["phase"] = f"backbone_depth_{training_depth}"
         
-        prog_end_time = time.time()
-        total_time = prog_end_time - prog_start_time
-        logging.info(f"--- Progressive model training finished in {total_time/60:.1f} minutes. Best F1: {overall_best_f1} ---")
+    prog_end_time = time.time()
+    total_time = prog_end_time - prog_start_time
+    logging.info(f"--- Progressive model training finished in {total_time/60:.1f} minutes. Best F1: {overall_best_f1:.4f} ---")
 
     return full_history, overall_best_state, overall_best_metrics
