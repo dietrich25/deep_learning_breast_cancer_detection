@@ -25,7 +25,7 @@ def main():
 
     config = {
         "batch_size": 32,
-        "epochs": 1,
+        "epochs": 25,
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         "checkpoints": "./checkpoints",
@@ -46,7 +46,7 @@ def main():
     Models = ["inception_v3"] 
     classifier_lr = [1e-4]
     backbone_lr = [1e-5]
-    Optimizers = ["adamw"]
+    Optimizers = ["sgd"]
     Depth = [1] 
 
     ### Result trackers ###

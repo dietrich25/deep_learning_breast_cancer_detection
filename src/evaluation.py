@@ -14,13 +14,6 @@ from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_sc
 def evaluate_model_performance(model, dataloader, criterion, device):
 
     start_time = time.time()
-
-    results = {
-        "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
-        "train_loss": [], "train_acc": [],
-        "val_acc": [], "val_loss": [], "val_recall": [], "val_precision": [],
-        "val_f1": [], "val_roc_auc": [], "val_specificity": []
-    }
     
     # Set the model into evaluation mode
     model.eval()
@@ -72,7 +65,7 @@ def evaluate_model_performance(model, dataloader, criterion, device):
 def load_and_evaluate_single_model(model_name:str, 
                                    test_df: pd.DataFrame,
                                    config: dict):
-
+    
     _, val_transform = apply_transforms(model_name)
     test_dataset = CBISDDSMDataset(test_df, transform=val_transform)
              
@@ -83,6 +76,8 @@ def load_and_evaluate_single_model(model_name:str,
                             pin_memory=True)
     checkpoint_path = os.path.join(config["checkpoints"], f"{model_name}_best.pth")
     model = load_model(model_name, checkpoint_path,config["device"], config["num_classes"])
+
+    model.eval()
 
     criterion = torch.nn.CrossEntropyLoss()
 

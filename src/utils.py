@@ -234,19 +234,20 @@ def load_model(model_name: str, checkpoint: str, device:torch.device, num_classe
         
     """
     if model_name == "resnet50":
-        model = models.resnet50(weights=None)
+        model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
         in_features = model.fc.in_features
         model.fc = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(in_features, num_classes))
     if model_name == "densenet121":
         model = models.densenet121(weights=None)
-        in_features = model.classifier.in_features
+        in_features = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1)
         model.classifier = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(in_features, num_classes))
     if model_name == "inception_v3":
-        model = models.inception_v3(weights=None)
+        #model = models.inception_v3(weights=None)
+        model = models.inception_v3(weights=models.Inception_V3_Weights.IMAGENET1K_V1, aux_logits=True)
         model.aux_logits = False
         in_features = model.fc.in_features
         model.fc = nn.Sequential(

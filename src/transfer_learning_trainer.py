@@ -163,7 +163,7 @@ def train_model_phase(model: torch.nn.Module,
     logging.debug(f"Initialising {phase} phase training for {model_name}...")
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=7)
-    early_stop = Earlystopping(patience=10, delta=0.005)
+    early_stop = Earlystopping(patience=7, delta=0.01)
 
     history = {
         "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
@@ -231,7 +231,7 @@ def train_model_phase(model: torch.nn.Module,
             break
     
     total_time = time.time() - total_start_time
-    logging.info(f"Training phase {phase} completed. Total time: {total_time/60:.1f} minutes | Best F1-score {val_f1:.4f}")
+    logging.info(f"Training phase {phase} completed. Total time: {total_time/60:.1f} minutes | Best F1-score {best_f1:.4f}")
 
     return history, best_model_state_dict, best_optimizer_state_dict, best_metrics
 
