@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import os
 from evaluation import evaluate_model_performance
-from utils import setup_logging
+from utils import setup_logging, load_model
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -26,8 +26,10 @@ class DemoEnsemble(nn.Module):
     # forward pass with soft voting
     def forward(self, x):
         ensemble_probabilities = None
-        
-        for model in self.models:
+
+        weights = [0.34, 0.32, 0.32] #test
+
+        for model, weight in zip(self.models, weights):
             model.eval()
             with torch.no_grad():
                 output = model(x)
@@ -35,9 +37,9 @@ class DemoEnsemble(nn.Module):
                 probabilities = F.softmax(output, dim=1)
 
                 if ensemble_probabilities is None:
-                    ensemble_probabilities = probabilities
+                    ensemble_probabilities = weight*probabilities
                 else:
-                    ensemble_probabilities += probabilities
+                    ensemble_probabilities += weight*probabilities
         
         # Average of probabilities
         ensemble_probabilities /= len(self.models)
@@ -46,26 +48,6 @@ class DemoEnsemble(nn.Module):
         ensemble_logits = torch.log(ensemble_probabilities + 1e-8)
 
         return ensemble_logits
-
-def load_model(model_name, checkpoint, device, num_classes):
-        if model_name == "resnet50":
-            model = models.resnet50(weights=None)
-            model.fc = nn.Linear(model.fc.in_features, num_classes)
-        if model_name == "densenet121":
-            model = models.densenet121(weights=None)
-            model.classifier = nn.Linear(model.classifier.in_features, num_classes)
-        if model_name == "inception_v3":
-            model = models.inception_v3(weights=None)
-            model.aux_logits = False
-            model.fc = nn.Linear(model.fc.in_features, num_classes)
-        
-        # Load checkpoint
-        checkpoint = torch.load(checkpoint, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.to(device)
-        model.eval()
-    
-        return model
 
 def evaluate_ensemble(model, dataloader, device):
 

@@ -55,7 +55,7 @@ def load_pgm_as_pil_image(file_path: str) -> Image.Image:
     try:
         img_array = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
         if img_array is None:
-            return None
+            raise RuntimeError(f"Could not read pgm image: {file_path}")
         img = Image.fromarray(img_array)
         return img
     
@@ -87,13 +87,23 @@ def load_cbis_ddsm_split(train_df_path: str,
     training_df = pd.read_csv(train_df_path)
     test_df = pd.read_csv(test_df_path)
 
+    ### Test for data leak, duplicated cases across sets
+    train_case_ids = set(training_df["case_id"])
+    test_case_ids = set(test_df["case_id"])
+    case_duplications = train_case_ids.intersection(test_case_ids)
+    if case_duplications:
+        logging.error(f"Data duplications detected between training and test datasets: {len(case_duplications)} cases can be found in both.")
+        raise ValueError("Data duplications detected between training and test datasets")
+    else:
+        logging.info("No data duplications detected between the training and test dataset.")
+
     train_df, val_df = train_test_split(training_df, 
-                                        test_size=val_split_ratio,
-                                        stratify=training_df["pathology"], 
-                                        random_state=random_state)
+                                    test_size=val_split_ratio,
+                                    stratify=training_df["pathology"], 
+                                    random_state=random_state)
     
     # Class distribution in the training dataset
-    logging.info(f"CBIS-DDSM official training dataset content: {len(training_df)} cases.")
+    logging.info(f"--- CBIS-DDSM official training dataset content: {len(training_df)} cases ---")
     train_class_counts = Counter(training_df["pathology"])
     for pathology, count in sorted(train_class_counts.items()):
         perc = (count/len(training_df)) * 100
@@ -113,6 +123,13 @@ def load_cbis_ddsm_split(train_df_path: str,
         perc = (count/len(val_df)) * 100
         logging.info(f"Validation subset class distribution: Pathology: {pathology} | Count: {count} | Percentage: {perc:.1f}%")
     
+    # Class distribution in the test dataset
+    logging.info(f"--- CBIS-DDSM official training dataset content: {len(test_df)} cases ---")
+    test_class_counts = Counter(test_df["pathology"])
+    for pathology, count in sorted(test_class_counts.items()):
+        perc = (count/len(test_df)) * 100
+        logging.info(f"Test dataset class distribution: Pathology: {pathology} | Count: {count} | Percentage: {perc:.1f}%")
+
     return train_df, val_df, test_df
 
 def get_dataset_labels(df):
@@ -143,12 +160,31 @@ def balance_cbis_ddsm_class_weights(dataset_labels, device):
     
     logging.debug(f"Class weights: {class_weights}")
 
-    # convert to tensors
     weight_tensor = torch.FloatTensor(class_weights).to(device)
 
     return weight_tensor
 
+def load_mias_dataset(file_path:str) -> pd.DataFrame:
 
+    df = pd.read_csv(file_path)
+    
+    logging.info("\n%s", df.head())
+
+    # Class distribution in the external test set dataset
+    logging.info(f"--- Mini-MIAS external validation dataset content: {len(df)} cases ---")
+    class_counts = Counter(df["severity"])
+    for severity, count in sorted(class_counts.items()):
+        perc = (count/len(df)) * 100
+        logging.info(f"Training dataset class distribution: Severity: {severity} | Count: {count} | Percentage: {perc:.1f}%")
+    
+    # Abnormality distribution in the external test set dataset
+    logging.info(f"--- Mini-MIAS external validation dataset abnormality subclasses ---")
+    class_counts = Counter(df["abnormality"])
+    for abnorm, count in sorted(class_counts.items()):
+        perc = (count/len(df)) * 100
+        logging.info(f"Training dataset class distribution: Abnormality: {abnorm} | Count: {count} | Percentage: {perc:.1f}%")
+    
+    return df
 
 
 class CBISDDSMDataset(Dataset):
@@ -184,9 +220,10 @@ class MIASDataset(Dataset):
 
     def __init__(self, dataframe, transform=None):
         self.data = dataframe.reset_index(drop=True)
+        self.data["severity"] = self.data["severity"].astype(str).str.strip()
         self.transform = transform
-        self.label = {
-            "": 0,
+        self.label_map = {
+            "Na": 0,
             "B": 0,
             "M": 1
         }
@@ -194,6 +231,22 @@ class MIASDataset(Dataset):
     def __len__(self):
         return len(self.data)
     
-    def __get_item__(self, idx):
-        #TBD
-        return 0
+    def __getitem__(self, idx):
+        img_path = os.path.normpath(self.data.loc[idx, "filepath"])
+
+        # read pgm image
+        img = load_pgm_as_pil_image(img_path)
+
+        # get and map the label
+        label_str = self.data.loc[idx, "severity"]
+        label = self.label_map.get(label_str, -1)
+        if label == -1:
+            logging.error(f"Invalid label at index {idx}: severity='{label_str}', filepath='{img_path}'")
+            logging.error(f"Available keys in label_map: {list(self.label_map.keys())}")
+            logging.error(f"Label string representation: {repr(label_str)}")
+
+        # apply transformation
+        if self.transform:
+            img = self.transform(img)
+
+        return img, label

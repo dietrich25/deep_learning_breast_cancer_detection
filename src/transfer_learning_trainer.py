@@ -125,8 +125,6 @@ def prepare_model(model_name: str, num_classes: int, training_depth: str) -> tor
     # Replace classifier
     classifier = getattr(model, classifier_name)
     in_features = classifier.in_features
-    #setattr(model, classifier_name, nn.Linear(in_features, num_classes))
-    # Add dropout
     if model_name == "resnet50" or model_name == "inception_v3":
         model.fc = nn.Sequential(
             nn.Dropout(0.5),
@@ -163,7 +161,7 @@ def train_model_phase(model: torch.nn.Module,
     logging.debug(f"Initialising {phase} phase training for {model_name}...")
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=7)
-    early_stop = Earlystopping(patience=7, delta=0.01)
+    early_stop = Earlystopping(patience=10, delta=0.01)
 
     history = {
         "model_name": [], "LR": [], "training_depth": [], "optimizer": [],

@@ -3,11 +3,12 @@
 
 import argparse
 import logging
-from datasets import CBISDDSMDataset, MIASDataset, load_cbis_ddsm_split, balance_cbis_ddsm_class_weights, get_dataset_labels
+import pandas as pd
+from datasets import CBISDDSMDataset, MIASDataset, load_cbis_ddsm_split, balance_cbis_ddsm_class_weights, get_dataset_labels, load_mias_dataset
 from preprocessing import apply_transforms
 from transfer_learning_trainer import progressive_model_training
-from evaluation import load_and_evaluate_single_model
-from utils import create_dirs, set_random_seeds, setup_logging, save_best_model
+from evaluation import load_and_evaluate_single_model, evaluate_model_performance
+from utils import create_dirs, set_random_seeds, setup_logging, save_best_model, load_model
 from torch.utils.data import DataLoader
 import torch
 import os
@@ -18,19 +19,20 @@ import multiprocessing
 
 def main():
 
-    run_training = False
+    run_training = False    
     run_validation = True
 
     workflow_start_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     config = {
         "batch_size": 32,
-        "epochs": 25,
+        "epochs": 50,
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         "checkpoints": "./checkpoints",
         "results_path": "./results",
         "logs_path": "./logs"
+        #add early stop here and pass down
     }
 
     ### Setting up logging ###
@@ -43,11 +45,11 @@ def main():
     logging.info("----- Transfer learning ML workflow started -----")
     
     ### Model training main parameters ####
-    Models = ["inception_v3"] 
-    classifier_lr = [1e-4]
-    backbone_lr = [1e-5]
-    Optimizers = ["sgd"]
-    Depth = [1] 
+    Models = ["resnet50"] 
+    classifier_lr = [0.001]
+    backbone_lr = [3e-5]
+    Optimizers = ["adam"]
+    Depth = [2] 
 
     ### Result trackers ###
     best_models = {}
@@ -59,11 +61,16 @@ def main():
     ### Load datasets ### 
     try:
         train_df_path = "./data/processed/combined_training_set_mapped.csv"
-        val_df_path = "./data/processed/combined_test_set_mapped.csv"
+        test_df_path = "./data/processed/combined_test_set_mapped.csv"
+        mias_path = "./data/processed/mias_external_verification_set.csv"
+
         train_df, val_df, test_df = load_cbis_ddsm_split(train_df_path,
-                                                                    val_df_path,
-                                                                    val_split_ratio=0.25,
-                                                                    random_state=42)
+                                                        test_df_path,
+                                                        val_split_ratio=0.25,
+                                                        random_state=42)
+        
+        external_dataset = load_mias_dataset(mias_path)
+        
         logging.info("Datasets successfully loaded.")
     except Exception as e:
         logging.error(f"Dataset loading failed with error {str(e)}")
@@ -176,16 +183,70 @@ def main():
     ### Validation of best performing single models on unseen data ###
     if run_validation:
         logging.info("Initialising model performance validation on test datasets.")
+        validation_results = []
 
-        val_results = []
-        # On the official CBIS-DDSM test set
         for model_name in Models:
-            eval_results = load_and_evaluate_single_model(model_name, test_df, config)
-            val_results.append(eval_results)
-        
+            # Load model
+            checkpoint_path = os.path.join(config["checkpoints"], f"{model_name}_best.pth")
+            model = load_model(model_name=model_name,
+                               checkpoint=checkpoint_path,
+                               device=config["device"],
+                               num_classes=config["num_classes"])
+            
+            # Load transformations and datasets
+            _, val_transform = apply_transforms(model_name)
+            test_dataset = CBISDDSMDataset(test_df, transform=val_transform)
+            test_external = MIASDataset(external_dataset,transform=val_transform)
+             
+            test_loader = DataLoader(test_dataset,
+                            batch_size=config["batch_size"],
+                            shuffle=False,
+                            num_workers=12,
+                            pin_memory=True)
+            external_loader = DataLoader(test_external,
+                            batch_size=config["batch_size"],
+                            shuffle=False,
+                            num_workers=12,
+                            pin_memory=True)
+            
+            # Loss function
+            criterion = torch.nn.CrossEntropyLoss()
+
+            logging.info(f"{model_name} performance evaluation of CBIS-DDSM test dataset.")
+            val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = evaluate_model_performance(model, 
+                                                                                                                test_loader, 
+                                                                                                              criterion, config["device"])
+            validation_results.append({"model_name": model_name,
+                                    "dataset": "cbis_ddsm_test",
+                                    "accuracy": val_acc,
+                                    "loss": val_loss,
+                                    "recall": val_recall,
+                                    "precision": val_precision,
+                                    "F1": val_f1,
+                                    "ROC_AUC": val_roc_auc,
+                                    "specificity": val_specificity})
+            
+            logging.info(f"{model_name} performance evaluation of MIAS external dataset.")
+            val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = evaluate_model_performance(model, 
+                                                                                                                external_loader, 
+                                                                                                                criterion, config["device"])
+            
+            validation_results.append({"model_name": model_name,
+                                    "dataset": "mias_test",
+                                    "accuracy": val_acc,
+                                    "loss": val_loss,
+                                    "recall": val_recall,
+                                    "precision": val_precision,
+                                    "F1": val_f1,
+                                    "ROC_AUC": val_roc_auc,
+                                    "specificity": val_specificity})
+
+        # save results
         eval_file = os.path.join(config["results_path"], f"model_evaluation_results_{workflow_start_timestamp}.json")
         with open(eval_file, 'w') as f:
-            json.dump(val_results, f, indent=2)
+            json.dump(validation_results, f, indent=2)
+
+            
             
 
 if __name__ == "__main__":

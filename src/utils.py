@@ -240,8 +240,8 @@ def load_model(model_name: str, checkpoint: str, device:torch.device, num_classe
             nn.Dropout(0.5),
             nn.Linear(in_features, num_classes))
     if model_name == "densenet121":
-        model = models.densenet121(weights=None)
-        in_features = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1)
+        model = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1)
+        in_features = model.classifier.in_features
         model.classifier = nn.Sequential(
             nn.Dropout(0.5),
             nn.Linear(in_features, num_classes))
