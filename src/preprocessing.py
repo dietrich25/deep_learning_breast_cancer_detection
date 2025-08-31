@@ -4,7 +4,6 @@
 # https://docs.pytorch.org/vision/stable/models.html
 
 import torchvision.transforms as transforms
-from PIL import Image
 
 # Preprocessing process:
 # Resize images
@@ -19,7 +18,7 @@ imgNetStd = [0.229, 0.224, 0.225]
 
 def apply_transforms(model_type):
     if model_type in ["resnet50" , "densenet121"]:
-        img_size = 768
+        img_size = 512
     elif model_type == "inception_v3":
         img_size = 512
     else:
@@ -31,7 +30,7 @@ def apply_transforms(model_type):
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(10),
         transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)), 
-        transforms.ColorJitter(brightness=0.1, contrast=0.1),
+        transforms.ColorJitter(brightness=0.10, contrast=0.10),
         transforms.ToTensor(),
         transforms.Normalize(mean = imgNetMean, std = imgNetStd)
     ])

@@ -3,11 +3,10 @@
 
 import argparse
 import logging
-import pandas as pd
 from datasets import CBISDDSMDataset, MIASDataset, load_cbis_ddsm_split, balance_cbis_ddsm_class_weights, get_dataset_labels, load_mias_dataset
 from preprocessing import apply_transforms
-from transfer_learning_trainer import progressive_model_training
-from evaluation import load_and_evaluate_single_model, evaluate_model_performance
+from transfer_learning_trainer import progressive_model_training, progressive_model_training_test, single_phase_training
+from evaluation import evaluate_model_performance
 from utils import create_dirs, set_random_seeds, setup_logging, save_best_model, load_model
 from torch.utils.data import DataLoader
 import torch
@@ -16,6 +15,8 @@ from itertools import product
 from datetime import datetime
 import json
 import multiprocessing
+from torch.utils.data import WeightedRandomSampler
+import numpy as np
 
 def main():
 
@@ -25,7 +26,7 @@ def main():
     workflow_start_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     config = {
-        "batch_size": 32,
+        "batch_size": 4,
         "epochs": 50,
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
@@ -45,11 +46,11 @@ def main():
     logging.info("----- Transfer learning ML workflow started -----")
     
     ### Model training main parameters ####
-    Models = ["resnet50"] 
-    classifier_lr = [0.001]
-    backbone_lr = [3e-5]
-    Optimizers = ["adam"]
-    Depth = [2] 
+    Models = ["resnet50", "densenet121", "inception_v3"] 
+    classifier_lr = [1e-3, 1e-4]
+    backbone_lr = [1e-4, 1e-5]
+    Optimizers = ["adam","adamw","sgd"]
+    Depth = [1, 2] 
 
     ### Result trackers ###
     best_models = {}
@@ -99,9 +100,21 @@ def main():
             dataset_labels = get_dataset_labels(train_df)
             class_weights = balance_cbis_ddsm_class_weights(dataset_labels, config["device"])
 
+            # https://towardsdatascience.com/demystifying-pytorchs-weightedrandomsampler-by-example-a68aceccb452/
+            # https://stackoverflow.com/questions/60812032/using-weightedrandomsampler-in-pytorch
+            targets = np.array(dataset_labels)
+            class_sample_count = np.array([len(np.where(targets == t)[0]) for t in np.unique(targets)])
+            weights = 1. / class_sample_count
+            sample_weights = np.array([weights[t] for t in targets])
+            sample_weights = torch.DoubleTensor(sample_weights)
+            sampler = WeightedRandomSampler(weights=sample_weights,
+                                            num_samples=len(sample_weights),
+                                            replacement=True)
+
             train_loader = DataLoader(train_dataset, 
                                     batch_size=config["batch_size"],
-                                    shuffle=True,
+                                    sampler=sampler,
+                                    #shuffle=True,
                                     num_workers=10,
                                     pin_memory=True)
             
@@ -110,6 +123,8 @@ def main():
                                     shuffle=False,
                                     num_workers=10,
                                     pin_memory=True)
+            
+            
 
             ### Store best performing model constellation ###
             model_best_f1 = 0.0
@@ -124,7 +139,7 @@ def main():
                 combination_count += 1
                 logging.info(f"---- Config {combination_count}/{total_combinations} | Model: {model_name} | Classifier LR:{class_lr} | Backbone LR: {back_lr}| Optimizer:{optimizer_name} | Layers unfrozen:{depth} ----")
 
-                history, best_model_state, best_metrics = progressive_model_training(model_name=model_name,
+                """history, best_model_state, best_metrics = progressive_model_training(model_name=model_name,
                         classifier_lr=class_lr,
                         backbone_lr=back_lr,
                         optimizer_name=optimizer_name,
@@ -132,7 +147,19 @@ def main():
                         train_loader=train_loader,
                         val_loader=val_loader,
                         config=config,
-                        class_weigths=class_weights)
+                        class_weigths=class_weights)"""
+                
+                history, best_model_state, best_metrics = single_phase_training(
+                    model_name=model_name,
+                    classifier_lr=class_lr,
+                    backbone_lr=back_lr,
+                    optimizer_name=optimizer_name,
+                    training_depth=depth,
+                    train_loader=train_loader,
+                    val_loader=val_loader,
+                    config=config,
+                    class_weights=class_weights  
+                )
 
                 results.append({"model_name": model_name,
                         "classifier_lr": class_lr,
@@ -212,43 +239,29 @@ def main():
             # Loss function
             criterion = torch.nn.CrossEntropyLoss()
 
+            ### Model testing on unseen data - CBIS-DDSM test set ###
             logging.info(f"{model_name} performance evaluation of CBIS-DDSM test dataset.")
             val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = evaluate_model_performance(model, 
                                                                                                                 test_loader, 
                                                                                                               criterion, config["device"])
-            validation_results.append({"model_name": model_name,
-                                    "dataset": "cbis_ddsm_test",
-                                    "accuracy": val_acc,
-                                    "loss": val_loss,
-                                    "recall": val_recall,
-                                    "precision": val_precision,
-                                    "F1": val_f1,
-                                    "ROC_AUC": val_roc_auc,
-                                    "specificity": val_specificity})
+            validation_results.append({"model_name": model_name, "dataset": "cbis_ddsm_test",
+                                    "accuracy": val_acc, "loss": val_loss, "recall": val_recall, "precision": val_precision,
+                                    "F1": val_f1, "ROC_AUC": val_roc_auc, "specificity": val_specificity})
             
+             ### Model testing on unseen data - Mini-MIAS external test set ###
             logging.info(f"{model_name} performance evaluation of MIAS external dataset.")
             val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = evaluate_model_performance(model, 
                                                                                                                 external_loader, 
                                                                                                                 criterion, config["device"])
-            
-            validation_results.append({"model_name": model_name,
-                                    "dataset": "mias_test",
-                                    "accuracy": val_acc,
-                                    "loss": val_loss,
-                                    "recall": val_recall,
-                                    "precision": val_precision,
-                                    "F1": val_f1,
-                                    "ROC_AUC": val_roc_auc,
-                                    "specificity": val_specificity})
+            validation_results.append({"model_name": model_name, "dataset": "mias_test", "accuracy": val_acc, 
+                                    "loss": val_loss, "recall": val_recall, "precision": val_precision,
+                                    "F1": val_f1, "ROC_AUC": val_roc_auc, "specificity": val_specificity})
 
         # save results
         eval_file = os.path.join(config["results_path"], f"model_evaluation_results_{workflow_start_timestamp}.json")
         with open(eval_file, 'w') as f:
             json.dump(validation_results, f, indent=2)
-
-            
-            
-
+  
 if __name__ == "__main__":
     multiprocessing.freeze_support()
 

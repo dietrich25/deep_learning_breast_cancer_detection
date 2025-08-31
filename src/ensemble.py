@@ -2,23 +2,24 @@
 # https://docs.pytorch.org/tutorials/intermediate/ensembling.html
 # https://discuss.pytorch.org/t/how-to-ensemble-different-cnn-models-when-use-the-same-dataset/91285
 # https://www.geeksforgeeks.org/machine-learning/voting-classifier/
+# https://machinelearningmastery.com/voting-ensembles-with-python/
 
 import torch
 import torch.nn as nn
 import pandas as pd
-from torchvision import models
 from preprocessing import apply_transforms
-from datasets import CBISDDSMDataset
+from datasets import CBISDDSMDataset,MIASDataset, load_mias_dataset
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import os
-from evaluation import evaluate_model_performance
 from utils import setup_logging, load_model
+from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, roc_auc_score, confusion_matrix
+from collections import Counter
+from datetime import datetime
+import logging
 
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-class DemoEnsemble(nn.Module):
+# Soft voting ensemble as in the feature prototype
+class SoftVotingEnsemble(nn.Module):
     def __init__(self, models):
         super().__init__()
         self.models = nn.ModuleList(models)
@@ -27,9 +28,7 @@ class DemoEnsemble(nn.Module):
     def forward(self, x):
         ensemble_probabilities = None
 
-        weights = [0.34, 0.32, 0.32] #test
-
-        for model, weight in zip(self.models, weights):
+        for model in self.models:
             model.eval()
             with torch.no_grad():
                 output = model(x)
@@ -37,9 +36,9 @@ class DemoEnsemble(nn.Module):
                 probabilities = F.softmax(output, dim=1)
 
                 if ensemble_probabilities is None:
-                    ensemble_probabilities = weight*probabilities
+                    ensemble_probabilities = probabilities
                 else:
-                    ensemble_probabilities += weight*probabilities
+                    ensemble_probabilities += probabilities
         
         # Average of probabilities
         ensemble_probabilities /= len(self.models)
@@ -49,14 +48,116 @@ class DemoEnsemble(nn.Module):
 
         return ensemble_logits
 
-def evaluate_ensemble(model, dataloader, device):
+class WeightedSoftVotingEnsemble(nn.Module):
+    def __init__(self, models, weights=None):
+        super().__init__()
+        self.models = nn.ModuleList(models)
+        
+        if weights is None:
+            self.weights = [1.0 / len(models)] * len(models)
+        else:
+            assert len(weights) == len(models), "Weights and models must match in length"
+            weight_sum = sum(weights)
+            self.weights = [w / weight_sum for w in weights]  # Normalize to sum = 1
 
+    def forward(self, x):
+        ensemble_probabilities = None
+
+        for model, weight in zip(self.models, self.weights):
+            model.eval()
+            with torch.no_grad():
+                output = model(x)
+                probabilities = F.softmax(output, dim=1)
+
+                if ensemble_probabilities is None:
+                    ensemble_probabilities = weight * probabilities
+                else:
+                    ensemble_probabilities += weight * probabilities
+
+        # Convert back to logits
+        ensemble_logits = torch.log(ensemble_probabilities + 1e-8)
+        return ensemble_logits
+
+class HardVotingEnsemble(nn.Module):
+    def __init__(self, models):
+        super().__init__()
+        self.models = nn.ModuleList(models)
+
+    def forward(self, x):
+        all_preds = []
+
+        for model in self.models:
+            model.eval()
+            with torch.no_grad():
+                outputs = model(x)
+                preds = torch.argmax(outputs, dim=1)  # Get class predictions
+                all_preds.append(preds)
+
+        # Stack predictions
+        all_preds = torch.stack(all_preds)
+
+        # Transpose
+        all_preds = all_preds.T 
+
+        # Apply hard voting
+        voted_preds = []
+        for sample_preds in all_preds:
+            most_common = Counter(sample_preds.tolist()).most_common(1)[0][0]
+            voted_preds.append(most_common)
+
+        return torch.tensor(voted_preds, device=x.device)
+
+def evaluate_hard_voting(model, dataloader, device):
+    model.eval()
+
+    all_labels = []
+    all_preds = []
+
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            preds = model(inputs)  # Already final class predictions
+            all_labels.extend(labels.cpu().numpy())
+            all_preds.extend(preds.cpu().numpy())
+
+    # Metrics
+    epoch_accuracy = accuracy_score(all_labels, all_preds)
+    epoch_recall = recall_score(all_labels, all_preds)
+    epoch_precision = precision_score(all_labels, all_preds)
+    epoch_f1 = f1_score(all_labels, all_preds)
+
+    try:
+        epoch_roc_auc = roc_auc_score(all_labels, all_preds)
+    except ValueError:
+        epoch_roc_auc = float("nan")
+
+    try:
+        tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
+        epoch_specificity = tn / (tn + fp) if (tn + fp) != 0 else float("nan")
+    except ValueError:
+        epoch_specificity = float("nan")
+
+    return {
+        "accuracy": epoch_accuracy,
+        "precision": epoch_precision,
+        "recall": epoch_recall,
+        "f1": epoch_f1,
+        "roc_auc": epoch_roc_auc,
+        "specificity": epoch_specificity
+    }
+
+def evaluate_ensemble(model, dataloader, device):
     model.eval()
     criterion = nn.CrossEntropyLoss()
 
-    total_loss= 0.0
+    total_loss = 0.0
     correct_predictions = 0
     total_predictions = 0
+
+    all_labels = []
+    all_preds = []
+    all_probs = []
 
     with torch.no_grad():
         for inputs, labels in dataloader:
@@ -67,83 +168,144 @@ def evaluate_ensemble(model, dataloader, device):
 
             total_loss += loss.item()
 
-            _, preds = torch.max(outputs, 1)
+            probs = torch.softmax(outputs, dim=1)
+            preds = torch.argmax(probs, dim=1)
+
+            all_labels.extend(labels.cpu().numpy())
+            all_preds.extend(preds.cpu().numpy())
+            all_probs.extend(probs[:, 1].cpu().numpy())
 
             correct_predictions += torch.sum(preds == labels).item()
             total_predictions += labels.size(0)
 
-    eval_loss = total_loss/len(dataloader)
-    eval_acc = correct_predictions/total_predictions
+    eval_loss = total_loss / len(dataloader)
+    eval_acc = correct_predictions / total_predictions
 
-    return eval_loss, eval_acc
+    # Metrics
+    epoch_recall = recall_score(all_labels, all_preds)
+    epoch_precision = precision_score(all_labels, all_preds)
+    epoch_f1 = f1_score(all_labels, all_preds)
 
+    try:
+        epoch_roc_auc = roc_auc_score(all_labels, all_probs)
+    except ValueError:
+        epoch_roc_auc = float("nan")  # roc_auc fails if only one class is present
 
-        
+    try:
+        tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
+        epoch_specificity = tn / (tn + fp) if (tn + fp) != 0 else float("nan")
+    except ValueError:
+        epoch_specificity = float("nan")  # confusion_matrix may fail on edge cases
+
+    return {
+        "loss": eval_loss,
+        "accuracy": eval_acc,
+        "precision": epoch_precision,
+        "recall": epoch_recall,
+        "f1": epoch_f1,
+        "roc_auc": epoch_roc_auc,
+        "specificity": epoch_specificity
+    }
+
+def log_metrics(metrics, dataset_name, ensemble_method_name):
+        val_acc         = metrics["accuracy"]
+        val_precision   = metrics["precision"]
+        val_recall      = metrics["recall"]
+        val_f1          = metrics["f1"]
+        val_roc_auc     = metrics["roc_auc"]
+        val_specificity = metrics["specificity"]
+
+        logging.info(f"---- Validation Metrics for {ensemble_method_name} Ensemble on {dataset_name} set:----")
+        logging.info(f"Accuracy       : {val_acc}")
+        logging.info(f"Precision      : {val_precision}")
+        logging.info(f"Recall         : {val_recall}")
+        logging.info(f"F1 Score       : {val_f1}")
+        logging.info(f"ROC AUC        : {val_roc_auc}")
+        logging.info(f"Specificity    : {val_specificity}")
+
 def main():
 
     config = {
-        "batch_size": 32,
+        "batch_size": 16, # optimized for 512x512 images
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         "checkpoints_path": "./checkpoints",
+        "results_path": "./results",
         "logs_path": "./logs"
     }
 
-    log_path = os.path.join(config["logs_path"], f"ensemble_test.log")
+    ### Initialise logging ###
+    workflow_start_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(config["logs_path"], f"ensemble_test_{workflow_start_timestamp}.log")
     setup_logging(log_path)
 
     model_names = ["resnet50", "densenet121", "inception_v3"]
+    datasets = ["cbis-ddsm", "mini-mias"]
+    ensemble_strategies = ["softvoting", "hardvoting", "weightedsoftvoting"]
 
-    results = {
-        "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
-        "train_loss": [], "train_acc": [],
-        "val_acc": [], "val_loss": [], "val_recall": [], "val_precision": [],
-        "val_f1": [], "val_roc_auc": [], "val_specificity": []
-    }
+    logging.debug(f"Starting ensemble model demo...")
 
-    print(f"Starting ensemble model demo...")
-    # validation dataset
-    val_mass_df = pd.read_csv("./data/processed/mass_case_description_test_set_mapped.csv")
+    # CBIS-DDSM reserved test set
+    cbis_test_set = pd.read_csv("./data/processed/combined_test_set_mapped.csv")
+    # Mini-MIAS external validation dataset
+    mias_path = "./data/processed/mias_external_verification_set.csv"
 
-    _, val_transform = apply_transforms("resnet50") # for testing
-    val_mass_dataset = CBISDDSMDataset(val_mass_df, transform=val_transform)
+    ### Initialise dataloaders ###
+    _, val_transform = apply_transforms("resnet50") # transformations has been unified
+    val_mass_dataset = CBISDDSMDataset(cbis_test_set, transform=val_transform)
     val_loader = DataLoader(val_mass_dataset, 
-                           batch_size=32,
+                           batch_size=8,
                            shuffle=False,
                            num_workers=4,
                            pin_memory=True)
+    
+    external_dataset = load_mias_dataset(mias_path)
+    test_external = MIASDataset(external_dataset,transform=val_transform)
+    external_loader = DataLoader(test_external,
+                            batch_size=config["batch_size"],
+                            shuffle=False,
+                            num_workers=12,
+                            pin_memory=True)
 
+    ### Load model checkpoints ###
     models = []
-
     for model_name in model_names:
         checkpoint_path = os.path.join(config["checkpoints_path"], f"{model_name}_best.pth")
         # Load models
         model = load_model(model_name, checkpoint_path,config["device"], config["num_classes"])
         models.append(model)
-    print(f"\nIndividual model checkpoints loaded...")
+    logging.debug(f"Individual model checkpoints loaded...")
 
-    # Ensemble setup
-    ensemble = DemoEnsemble(models)
-    print(f"\nEnsemble model set...")
-    ensemble.to(config["device"])
+    weights = [0.4, 0.3, 0.3]  # Approximate estimation based on model performance
 
-    criterion = torch.nn.CrossEntropyLoss()
+    ### Ensemble integration ###
+    for strategy in ensemble_strategies:
+        metrics = []
+        if strategy == "weightedsoftvoting":
+            ensemble = WeightedSoftVotingEnsemble(models, weights)
+            ensemble.to(config["device"])
+        if strategy == "softvoting":
+            ensemble = SoftVotingEnsemble(models)
+            ensemble.to(config["device"])
+        if strategy == "hardvoting":
+            ensemble = HardVotingEnsemble(models)
+            ensemble.to(config["device"])
 
-    print("\nTesting ensemble on validation set...")
-    val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = evaluate_model_performance(ensemble, val_loader, criterion, config["device"])
-
-
-    results["model_name"].append("ensemble")
-    results["val_acc"].append(val_acc)
-    results["val_loss"].append(val_loss)
-    results["val_recall"].append(val_recall)
-    results["val_precision"].append(val_precision)
-    results["val_f1"].append(val_f1)
-    results["val_roc_auc"].append(val_roc_auc)
-    results["val_specificity"].append(val_specificity)
-    
-    torch.save(results, 'ensemble_evaluation_results.pth')
-    print(f"\nResults saved to 'ensemble_evaluation_results.pth'")
+        for set in datasets:
+            if strategy == "softvoting" or strategy == "weightedsoftvoting":
+                if set == "cbis-ddsm":
+                    metrics = evaluate_ensemble(ensemble, val_loader, config["device"])
+                else:
+                    metrics = evaluate_ensemble(ensemble, external_loader, config["device"])
+                
+            else:
+                if set == "cbis-ddsm":
+                    metrics = evaluate_hard_voting(ensemble, val_loader, config["device"])
+                else:
+                    metrics = evaluate_hard_voting(ensemble, external_loader, config["device"])
+            log_metrics(metrics, set, strategy)
+                
+    logging.info("Workflow ended")
 
 if __name__ == "__main__":
     main()

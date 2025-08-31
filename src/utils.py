@@ -1,12 +1,12 @@
 import random
 import numpy as np
+import pandas as pd
 import torch
 import os
 import logging
 import torch.nn as nn
 import torchvision.models as models
 from torch import optim
-
 
 ### General support functions ###
 def set_random_seeds(seed):
@@ -17,17 +17,110 @@ def set_random_seeds(seed):
     torch.cuda.manual_seed(seed)
 
 def setup_logging(path):
-    """Set up logging for the project (on debug level)."""
+    """Set up logging for the project/module (on debug level)."""
     logging.basicConfig(level=logging.DEBUG,
                         format="%(asctime)s - %(levelname)s - %(message)s",
                         handlers = [logging.FileHandler(path), logging.StreamHandler()])
-    logging.info(f"Log file: {path}")
+    logging.info(f"Logging initialised, log file: {path}")
 
 def create_dirs(config):
     """Create directories for checkpoints, results and logs."""
     os.makedirs(config["checkpoints"], exist_ok=True)
     os.makedirs(config["results_path"], exist_ok=True)
     os.makedirs(config["logs_path"], exist_ok=True)
+
+### Dataset related functions ###
+def standardise_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Standardise column naming convention across dataframes and to use underscores in column names instead of spaces.
+
+    Parameters:
+        df(pd.DataFrame): Input dataframe that might contain column names with non-standard value.
+    
+    Returns:
+        pd.DataFrame: Copy of the input dataframe with standardised column names.
+    
+    """
+    df = df.copy()
+    new_colum_names = {col: col.replace(" ", "_") for col in df.columns}
+    df = df.rename(columns=new_colum_names)
+    
+    return df
+
+def create_case_id(file_path:str) -> str:
+    """
+    Extract the case ID from the file path (assuming the path structure uses '/' and the cse ID is the first directory in the path).
+
+    Parameters:
+        file_path(str): File path string.
+    
+    Returns:
+        str: Extracted case ID.
+    """
+    return os.path.dirname(file_path).split("/")[0]
+
+def get_largest_dcm_file(case_id: str, root_dir:str) -> str:
+    """
+    Return the file path to the largest Dicom file (full mammogram image) for a given case ID.
+
+    Parameters:
+        case_id (str): Case ID used as an unique identifier for a patient case.
+        root_dir (str): Directiry that contains all CBIS-DDSM cases.
+    
+    Returns:
+        largest_file (str): Full image file path to the largest .dcm file connected to a case, or None if no file is found.
+    """
+
+    case_folder = os.path.join(root_dir, case_id)
+    largest_file = None
+    largest_size = -1
+    
+    for dirpath, dirnames, filenames in os.walk(case_folder):
+        for filename in filenames:
+            if filename.lower().endswith(".dcm"):
+                filepath = os.path.join(dirpath, filename)
+                size = os.path.getsize(filepath)
+                if size > largest_size:
+                    largest_size = size
+                    largest_file = filepath
+                
+    return largest_file.replace("\\", "/")
+
+def prepare_for_merge(df: pd.DataFrame, type: str) -> pd.DataFrame:
+    """
+    Prepare dataframe to have consistent column structure for merge. Missing columns are added with NaN values.
+
+    Parameters:
+        df (pd.Dataframe): Input dataframe either for the mass or the calcifications subset
+
+    Returns:
+        df (pd.Dataframe): Dataframe with standardised column structure.
+
+    """
+    df = df.copy()
+
+    if type == "mass":
+        df["calc_type"] = None
+        df["calc_distribution"] = None
+    else:
+        df["mass_shape"] = None
+        df["mass_margins"] = None
+    
+    return df
+
+def save_dataframe(df: pd.DataFrame, output_csv_path: str):
+    """
+    Saves a pd.DataFrame to csv file.
+
+    Parameters:
+        df (pd.DataFrame): Dataframe to be saved.
+        output_csv_path (str): Full file path to be used to save the csv.
+
+    Returns:
+        None
+    """
+    df.to_csv(output_csv_path, index=False)
+    print(f"Saved: {output_csv_path}")
 
 ### DL related support function ###
 
@@ -130,7 +223,6 @@ def optimizer_add_new_params(optimizer: torch.optim.Optimizer,
     
     return optimizer
 
-
 def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> torch.nn.Module:
     """
     Unfreezes a specified number of top blocks in a Pytorch model. 
@@ -147,7 +239,7 @@ def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> to
     Returns:
         model(torch.nn.Module): Pytorch model with selected layers unfrozen for training.
     """
-    if model_name == "resnet50" or model_name == "inception_v3":
+    """if model_name == "resnet50" or model_name == "inception_v3":
         for param in model.fc.parameters():
             param.requires_grad = True
     elif model_name == "densenet121":
@@ -155,7 +247,7 @@ def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> to
             param.requires_grad = True
     else:
         logging.error(f"Invalid model_name passed to unfreeze_layer(): {model_name}.")
-        raise ValueError(f"Invalid parameter passed to unfreeze_layer(): {model_name}.")
+        raise ValueError(f"Invalid parameter passed to unfreeze_layer(): {model_name}.")"""
 
     if num_depth == 0:
         pass

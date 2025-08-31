@@ -1,7 +1,7 @@
 import pandas as pd
 import logging
 import os
-from datasets import load_pgm_as_pil_image
+from utils import save_dataframe
 
 log_path = os.path.join("./logs", f"mias_dataset_preparation_log.log")
 filepath = "./data/raw/MIAS_metadata/metadata.txt"
@@ -19,19 +19,17 @@ logging.basicConfig(level=logging.DEBUG,
     
 logging.info(f"Logging initialised for MIAS dataset preparation, log file: {log_path}")
 
-### read resource file ###
+### Read resource file ###
 with open(filepath, "r") as file:
     lines = file.readlines()
-
 parsed_rows = []
 for line in lines[1:]: 
     tokens = line.strip().split()
     tokens += ["Na"] * (len(columns) - len(tokens))
     parsed_rows.append(tokens[:len(columns)]) 
-
 df = pd.DataFrame(parsed_rows, columns=columns)
 
-
+logging.info("================= MIAS Dataset =================")
 ### Examine metadata content ###
 logging.debug(df.head())
 logging.debug(df.shape)
@@ -71,6 +69,5 @@ logging.info(f"Missing label count: {nan_count}")
 
 ### Create cleaned dataset csv ###
 output_path = "./data/processed/mias_external_verification_set.csv"
-df.to_csv(output_path, index=False)
-logging.info(f"Saved: {output_path}")
+save_dataframe(df=df,output_csv_path=output_path)
 
