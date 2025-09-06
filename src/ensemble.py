@@ -20,12 +20,19 @@ import logging
 
 # Soft voting ensemble as in the feature prototype
 class SoftVotingEnsemble(nn.Module):
-    def __init__(self, models):
+    """
+    Ensemble model using soft voting (average of softmax probabilities).
+
+    Args:
+        models (list[nn.Module]): List of pretrained models to ensemble.
+    """
+
+    def __init__(self, models: list[nn.Module]):
         super().__init__()
         self.models = nn.ModuleList(models)
     
     # forward pass with soft voting
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         ensemble_probabilities = None
 
         for model in self.models:
@@ -49,7 +56,15 @@ class SoftVotingEnsemble(nn.Module):
         return ensemble_logits
 
 class WeightedSoftVotingEnsemble(nn.Module):
-    def __init__(self, models, weights=None):
+    """
+    Ensemble model using weighted soft voting.
+
+    Args:
+        models (list[nn.Module]): List of pretrained models to ensemble.
+        weights (list[float], optional): Weights for each model. Defaults to equal weights.
+    """
+
+    def __init__(self, models: list[nn.Module], weights: list[float] = None):
         super().__init__()
         self.models = nn.ModuleList(models)
         
@@ -60,7 +75,7 @@ class WeightedSoftVotingEnsemble(nn.Module):
             weight_sum = sum(weights)
             self.weights = [w / weight_sum for w in weights]  # Normalize to sum = 1
 
-    def forward(self, x):
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
         ensemble_probabilities = None
 
         for model, weight in zip(self.models, self.weights):
@@ -79,11 +94,18 @@ class WeightedSoftVotingEnsemble(nn.Module):
         return ensemble_logits
 
 class HardVotingEnsemble(nn.Module):
-    def __init__(self, models):
+    """
+    Ensemble model using hard voting (majority class prediction).
+
+    Args:
+        models (list[nn.Module]): List of pretrained models to ensemble.
+    """
+
+    def __init__(self, models: list[nn.Module]):
         super().__init__()
         self.models = nn.ModuleList(models)
 
-    def forward(self, x):
+    def forward(self, x:torch.Tensor) -> torch.Tensor:
         all_preds = []
 
         for model in self.models:
@@ -107,7 +129,21 @@ class HardVotingEnsemble(nn.Module):
 
         return torch.tensor(voted_preds, device=x.device)
 
-def evaluate_hard_voting(model, dataloader, device):
+def evaluate_hard_voting(model: nn.Module, 
+                         dataloader: DataLoader, 
+                         device: torch.Device) -> dict:
+    """
+    Evaluate a hard voting ensemble on a dataset.
+
+    Args:
+        model (nn.Module): Hard voting ensemble model.
+        dataloader (DataLoader): Dataloader for evaluation.
+        device (torch.device): Computation device (CPU or CUDA).
+
+    Returns:
+        dict: Dictionary of evaluation metrics
+    """
+
     model.eval()
 
     all_labels = []
@@ -147,7 +183,21 @@ def evaluate_hard_voting(model, dataloader, device):
         "specificity": epoch_specificity
     }
 
-def evaluate_ensemble(model, dataloader, device):
+def evaluate_ensemble(model:nn.Module, 
+                      dataloader: DataLoader, 
+                      device: torch.Device) -> dict:
+    """
+    Evaluate a soft or weighted soft voting ensemble.
+
+    Args:
+        model (nn.Module): Ensemble model returning logits.
+        dataloader (DataLoader): Dataloader for evaluation.
+        device (torch.device): Computation device (CPU or CUDA).
+
+    Returns:
+        dict: Dictionary of evaluation metrics
+    """
+
     model.eval()
     criterion = nn.CrossEntropyLoss()
 
@@ -207,23 +257,36 @@ def evaluate_ensemble(model, dataloader, device):
         "specificity": epoch_specificity
     }
 
-def log_metrics(metrics, dataset_name, ensemble_method_name):
-        val_acc         = metrics["accuracy"]
-        val_precision   = metrics["precision"]
-        val_recall      = metrics["recall"]
-        val_f1          = metrics["f1"]
-        val_roc_auc     = metrics["roc_auc"]
-        val_specificity = metrics["specificity"]
+def log_metrics(metrics: dict, 
+                dataset_name: str, 
+                ensemble_method_name: str) -> None:
+    """
+    Log evaluation metrics for a dataset and ensemble method.
 
-        logging.info(f"---- Validation Metrics for {ensemble_method_name} Ensemble on {dataset_name} set:----")
-        logging.info(f"Accuracy       : {val_acc}")
-        logging.info(f"Precision      : {val_precision}")
-        logging.info(f"Recall         : {val_recall}")
-        logging.info(f"F1 Score       : {val_f1}")
-        logging.info(f"ROC AUC        : {val_roc_auc}")
-        logging.info(f"Specificity    : {val_specificity}")
+    Args:
+        metrics (dict): Dictionary of computed evaluation metrics.
+        dataset_name (str): Dataset identifier (e.g., "cbis-ddsm").
+        ensemble_method_name (str): Ensemble method identifier (e.g., "softvoting").
+    """
+    val_acc         = metrics["accuracy"]
+    val_precision   = metrics["precision"]
+    val_recall      = metrics["recall"]
+    val_f1          = metrics["f1"]
+    val_roc_auc     = metrics["roc_auc"]
+    val_specificity = metrics["specificity"]
 
-def main():
+    logging.info(f"---- Validation Metrics for {ensemble_method_name} Ensemble on {dataset_name} set:----")
+    logging.info(f"Accuracy       : {val_acc}")
+    logging.info(f"Precision      : {val_precision}")
+    logging.info(f"Recall         : {val_recall}")
+    logging.info(f"F1 Score       : {val_f1}")
+    logging.info(f"ROC AUC        : {val_roc_auc}")
+    logging.info(f"Specificity    : {val_specificity}")
+
+def main() -> None:
+    """
+    Run evaluation workflow for pretrained CNN ensemble models.
+    """
 
     config = {
         "batch_size": 16, # optimized for 512x512 images
