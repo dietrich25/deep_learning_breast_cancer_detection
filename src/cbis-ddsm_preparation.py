@@ -82,7 +82,6 @@ logging.info(f"Training set percentage distribution: {perc_training.round(2)}%")
 logging.info(f"Test set class value distribution: {test_distribution}")
 logging.info(f"Test set percentage distribution: {perc_test.round(2)}%")
 
-
 logging.info("================= Save dataframes =================")
 save_dataframe(Combined_Training, os.path.join(output_folder, "combined_training_set_mapped.csv"))
 save_dataframe(Combined_Test, os.path.join(output_folder, "combined_test_set_mapped.csv"))

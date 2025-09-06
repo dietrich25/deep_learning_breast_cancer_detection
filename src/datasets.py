@@ -18,13 +18,13 @@ from sklearn.utils.class_weight import compute_class_weight
 
 def load_dicom_as_pil_image(file_path: str) -> Image.Image:
     """
-    Read a DICOM file and convert it to an RGB PIL image.
+    Load a DICOM file and convert it to an RGB PIL image.
 
     Args:
         file_path(string): Path to the .dcm file.
     
     Returns:
-        PIL.Image.Image with 3-channels (RGB).
+        Image.Image: PIL Image with 3-channels (RGB), or None if loading fails.
     """
     try:
         dcm = pydicom.dcmread(file_path)
@@ -44,13 +44,13 @@ def load_dicom_as_pil_image(file_path: str) -> Image.Image:
 
 def load_pgm_as_pil_image(file_path: str) -> Image.Image:
     """
-    Read a PGM file and convert it to an RGB PIL image.
+    Load a PGM image file and convert it to a 3-channel RGB PIL image.
 
     Args:
         file_path(string): Path to the .pgm file.
     
     Returns:
-        PIL.Image.Image with 3-channels (RGB).
+        Image.Image: PIL image in grayscale format, or None if loading fails.
     """
     try:
         img_array = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
@@ -71,7 +71,7 @@ def load_cbis_ddsm_split(train_df_path: str,
     """
     Load CBIS-DDSM datasets and create stratified (by pathology) train/validation/test splits.
 
-    Parameters:
+    Args:
         train_df_path(str): Path to the csv file containing metadata about the CBIS-DDSM official training set
         test_df_path(str): Path to the csv file containing metadata about the CBIS-DDSM official test set
         val_split_ratio(float): proportion of the training dataset to use for validation (0.0 - 1.0)
@@ -132,8 +132,16 @@ def load_cbis_ddsm_split(train_df_path: str,
 
     return train_df, val_df, test_df
 
-def get_dataset_labels(df):
-    """Get the pathology labels from the CBIS-DDSM cases."""
+def get_dataset_labels(df: pd.DataFrame) -> list[int]:
+    """
+    Extract the pathology labels from the CBIS-DDSM cases.
+
+    Args:
+        df (pd.DataFrame): Dataframe that contains a 'pathology' column.
+    
+    Returns:
+        list[int]: lost of labels (0 for benign, 1 for malignant).
+    """
     label_map = {
         "BENIGN": 0,
         "BENIGN_WITHOUT_CALLBACK": 0,
@@ -149,7 +157,17 @@ def get_dataset_labels(df):
     
     return labels
 
-def balance_cbis_ddsm_class_weights(dataset_labels, device):
+def balance_cbis_ddsm_class_weights(dataset_labels: list[int], device: torch.device) -> torch.Tensor:
+    """
+    Compute clas weigths for the CBIS-DDSM dataset.
+
+    Args:
+        dataset_labels (list[int]): List of class labels.
+        device (torch.device): Torch device to send the weight tensors to.
+    
+    Returns:
+        torch.tensore: Tensor of class weights.
+    """
     
     class_counts = Counter(dataset_labels)
     unique_classes = sorted(class_counts.keys())
@@ -165,7 +183,15 @@ def balance_cbis_ddsm_class_weights(dataset_labels, device):
     return weight_tensor
 
 def load_mias_dataset(file_path:str) -> pd.DataFrame:
+    """
+    Load the Mini-MIAS metadata from CSV file.
 
+    Args:
+        file_path(str): Path to the Mini-MIAS CSV file.
+    
+    Returns:
+        pd.DataFrame: Loaded dataframe with Mini-MIAS metadata.
+    """
     df = pd.read_csv(file_path)
     
     logging.info("\n%s", df.head())
@@ -188,6 +214,14 @@ def load_mias_dataset(file_path:str) -> pd.DataFrame:
 
 
 class CBISDDSMDataset(Dataset):
+    """
+    PyTorch Dataset for CBIS-DDSM images and labels.
+
+    Args:
+        dataframe (pd.DataFrame): Dataframe with image paths and labels.
+        transform (callable, optional): Optional torchvision transform to apply to images.
+    """
+    
     def __init__(self, dataframe, transform = None):
         self.data = dataframe.reset_index(drop=True)
         self.transform = transform
@@ -217,6 +251,14 @@ class CBISDDSMDataset(Dataset):
         return img, label
 
 class MIASDataset(Dataset):
+    """
+    PyTorch Dataset for Mini-MIAS  images and binary severity labels.
+
+    Args:
+        dataframe (pd.DataFrame): Dataframe with image paths and severity labels.
+        transform (callable, optional): Optional torchvision transform to apply to images.
+        
+    """
 
     def __init__(self, dataframe, transform=None):
         self.data = dataframe.reset_index(drop=True)
