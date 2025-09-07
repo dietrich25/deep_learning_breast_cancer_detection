@@ -7,11 +7,26 @@ import os
 import torch
 import logging
 import time
+import torch.nn as nn
 # Model evaluation metrics
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score,roc_auc_score, confusion_matrix
 
+def evaluate_model_performance(model:nn.Module, 
+                               dataloader:DataLoader, 
+                               criterion:nn.Module, 
+                               device:torch.Device) -> tuple:
+    """
+    Evaluate a model's performance on a dataset using the given loss criterion.
 
-def evaluate_model_performance(model, dataloader, criterion, device):
+    Args:
+        model (nn.Module): Trained model to evaluate.
+        dataloader (DataLoader): DataLoader for evaluation data.
+        criterion (nn.Module): Loss function.
+        device (torch.device): Computation device (CPU or CUDA).
+
+    Returns:
+        tuple: (accuracy, loss, recall, precision, f1_score, roc_auc, specificity)
+    """
 
     start_time = time.time()
     
@@ -46,54 +61,154 @@ def evaluate_model_performance(model, dataloader, criterion, device):
     epoch_time = time.time() - start_time
     epoch_loss = running_loss / num_batches
 
-    epoch_accuracy = accuracy_score(all_labels, all_preds)
-    epoch_recall = recall_score(all_labels, all_preds)
-    epoch_precision = precision_score(all_labels, all_preds)
-    epoch_f1 = f1_score(all_labels, all_preds)
-    epoch_roc_auc = roc_auc_score(all_labels, all_probs)
+    metrics = compute_classification_metrics(all_labels, all_preds, all_probs)
 
-    #specificity 
-    tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
-    epoch_specificity = tn / (tn+fp) if (tn+fp) != 0 else float("nan")
+    logging.info(f"Model validation completed: {epoch_time:.1f}s | Loss: {epoch_loss:.4f} | F1: {metrics['f1']:.4f} | Acc: {metrics['accuracy']:.4f}")
+    logging.debug(f"Precision={metrics['precision']:.4f} | Recall={metrics['recall']:.4f} | Specificity={metrics['specificity']:.4f} | ROC-AUC={metrics['roc_auc']:.4f}")
 
-    logging.info(f"Model validation completed: {epoch_time:.1f}s | Loss: {epoch_loss:.4f} | F1: {epoch_f1:.4f} | Acc: {epoch_accuracy:.4f}")
-    logging.debug(f"Precision={epoch_precision:.4f} | Recall={epoch_recall:.4f} | Specificity={epoch_specificity:.4f} | ROC-AUC={epoch_roc_auc:.4f}")
+    return (metrics["accuracy"], epoch_loss, metrics["recall"], metrics["precision"], metrics["f1"], metrics["roc_auc"], metrics["specificity"])
 
-    return epoch_accuracy, epoch_loss, epoch_recall, epoch_precision, epoch_f1, epoch_roc_auc, epoch_specificity
+def evaluate_hard_voting(model: nn.Module, 
+                         dataloader: DataLoader, 
+                         device: torch.Device) -> dict:
+    """
+    Evaluate a hard voting ensemble on a dataset.
 
+    Args:
+        model (nn.Module): Hard voting ensemble model.
+        dataloader (DataLoader): Dataloader for evaluation.
+        device (torch.device): Computation device (CPU or CUDA).
 
-def load_and_evaluate_single_model(model_name:str, 
-                                   test_df: pd.DataFrame,
-                                   config: dict):
-    
-    _, val_transform = apply_transforms(model_name)
-    test_dataset = CBISDDSMDataset(test_df, transform=val_transform)
-             
-    test_loader = DataLoader(test_dataset,
-                            batch_size=config["batch_size"],
-                            shuffle=False,
-                            num_workers=12,
-                            pin_memory=True)
-    checkpoint_path = os.path.join(config["checkpoints"], f"{model_name}_best.pth")
-    model = load_model(model_name, checkpoint_path,config["device"], config["num_classes"])
+    Returns:
+        dict: Dictionary of evaluation metrics
+    """
 
     model.eval()
 
-    criterion = torch.nn.CrossEntropyLoss()
+    all_labels = []
+    all_preds = []
 
-    val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = evaluate_model_performance(model, 
-                                                                                                                test_loader, 
-                                                                                                                criterion, config["device"])
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
 
-    results = {
-        "model": model_name,
-        "accuracy": val_acc,
-        "loss": val_loss,
-        "recall": val_recall,
-        "precision": val_precision,
-        "f1_score": val_f1,
-        "roc_auc": val_roc_auc,
-        "specificity": val_specificity
+            preds = model(inputs)  # Already final class predictions
+            all_labels.extend(labels.cpu().numpy())
+            all_preds.extend(preds.cpu().numpy())
+
+    metrics = compute_classification_metrics(all_labels, all_preds)
+
+    return metrics
+
+def evaluate_ensemble(model:nn.Module, 
+                      dataloader: DataLoader, 
+                      device: torch.Device) -> dict:
+    """
+    Evaluate a soft or weighted soft voting ensemble.
+
+    Args:
+        model (nn.Module): Ensemble model returning logits.
+        dataloader (DataLoader): Dataloader for evaluation.
+        device (torch.device): Computation device (CPU or CUDA).
+
+    Returns:
+        dict: Dictionary of evaluation metrics
+    """
+
+    model.eval()
+    criterion = nn.CrossEntropyLoss()
+
+    total_loss = 0.0
+
+    all_labels = []
+    all_preds = []
+    all_probs = []
+
+    with torch.no_grad():
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+
+            total_loss += loss.item()
+
+            probs = torch.softmax(outputs, dim=1)
+            preds = torch.argmax(probs, dim=1)
+
+            all_labels.extend(labels.cpu().numpy())
+            all_preds.extend(preds.cpu().numpy())
+            all_probs.extend(probs[:, 1].cpu().numpy())
+
+    eval_loss = total_loss / len(dataloader)
+
+    metrics = compute_classification_metrics(all_labels, all_preds, all_probs)
+    metrics["loss"] = eval_loss
+
+    return metrics
+
+def compute_classification_metrics(labels: list, 
+                                   preds: list, 
+                                   probs: list = None) -> dict:
+    """
+    Compute evaluation metrics for classification results.
+
+    Args:
+        labels (list): Ground truth class labels.
+        preds (list): Predicted class labels.
+        probs (list, optional): Predicted probabilities for the positive class. 
+                                Required for ROC-AUC calculation.
+
+    Returns:
+        dict: Dictionary containing accuracy, precision, recall, F1 score, 
+              ROC-AUC (if probs provided), and specificity.
+    """
+
+    metrics = {
+        "accuracy": accuracy_score(labels, preds),
+        "recall": recall_score(labels, preds),
+        "precision": precision_score(labels, preds),
+        "f1": f1_score(labels, preds)
     }
 
-    return results
+    if probs is not None:
+        try:
+            metrics["roc_auc"] = roc_auc_score(labels, probs)
+        except ValueError:
+            metrics["roc_auc"] = float("nan")
+    else:
+        metrics["roc_auc"] = float("nan")
+
+    try:
+        tn, fp, fn, tp = confusion_matrix(labels, preds).ravel()
+        metrics["specificity"] = tn / (tn + fp) if (tn + fp) > 0 else float("nan")
+    except ValueError:
+        metrics["specificity"] = float("nan")
+
+    return metrics
+
+def log_metrics(metrics: dict, 
+                dataset_name: str, 
+                ensemble_method_name: str) -> None:
+    """
+    Log evaluation metrics for a dataset and ensemble method.
+
+    Args:
+        metrics (dict): Dictionary of computed evaluation metrics.
+        dataset_name (str): Dataset identifier (e.g., "cbis-ddsm").
+        ensemble_method_name (str): Ensemble method identifier (e.g., "softvoting").
+    """
+    val_acc         = metrics["accuracy"]
+    val_precision   = metrics["precision"]
+    val_recall      = metrics["recall"]
+    val_f1          = metrics["f1"]
+    val_roc_auc     = metrics["roc_auc"]
+    val_specificity = metrics["specificity"]
+
+    logging.info(f"---- Validation Metrics for {ensemble_method_name} Ensemble on {dataset_name} set:----")
+    logging.info(f"Accuracy       : {val_acc}")
+    logging.info(f"Precision      : {val_precision}")
+    logging.info(f"Recall         : {val_recall}")
+    logging.info(f"F1 Score       : {val_f1}")
+    logging.info(f"ROC AUC        : {val_roc_auc}")
+    logging.info(f"Specificity    : {val_specificity}")

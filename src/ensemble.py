@@ -9,6 +9,7 @@ import torch.nn as nn
 import pandas as pd
 from preprocessing import apply_transforms
 from datasets import CBISDDSMDataset,MIASDataset, load_mias_dataset
+from evaluation import evaluate_hard_voting, evaluate_ensemble
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import os
@@ -128,134 +129,6 @@ class HardVotingEnsemble(nn.Module):
             voted_preds.append(most_common)
 
         return torch.tensor(voted_preds, device=x.device)
-
-def evaluate_hard_voting(model: nn.Module, 
-                         dataloader: DataLoader, 
-                         device: torch.Device) -> dict:
-    """
-    Evaluate a hard voting ensemble on a dataset.
-
-    Args:
-        model (nn.Module): Hard voting ensemble model.
-        dataloader (DataLoader): Dataloader for evaluation.
-        device (torch.device): Computation device (CPU or CUDA).
-
-    Returns:
-        dict: Dictionary of evaluation metrics
-    """
-
-    model.eval()
-
-    all_labels = []
-    all_preds = []
-
-    with torch.no_grad():
-        for inputs, labels in dataloader:
-            inputs, labels = inputs.to(device), labels.to(device)
-
-            preds = model(inputs)  # Already final class predictions
-            all_labels.extend(labels.cpu().numpy())
-            all_preds.extend(preds.cpu().numpy())
-
-    # Metrics
-    epoch_accuracy = accuracy_score(all_labels, all_preds)
-    epoch_recall = recall_score(all_labels, all_preds)
-    epoch_precision = precision_score(all_labels, all_preds)
-    epoch_f1 = f1_score(all_labels, all_preds)
-
-    try:
-        epoch_roc_auc = roc_auc_score(all_labels, all_preds)
-    except ValueError:
-        epoch_roc_auc = float("nan")
-
-    try:
-        tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
-        epoch_specificity = tn / (tn + fp) if (tn + fp) != 0 else float("nan")
-    except ValueError:
-        epoch_specificity = float("nan")
-
-    return {
-        "accuracy": epoch_accuracy,
-        "precision": epoch_precision,
-        "recall": epoch_recall,
-        "f1": epoch_f1,
-        "roc_auc": epoch_roc_auc,
-        "specificity": epoch_specificity
-    }
-
-def evaluate_ensemble(model:nn.Module, 
-                      dataloader: DataLoader, 
-                      device: torch.Device) -> dict:
-    """
-    Evaluate a soft or weighted soft voting ensemble.
-
-    Args:
-        model (nn.Module): Ensemble model returning logits.
-        dataloader (DataLoader): Dataloader for evaluation.
-        device (torch.device): Computation device (CPU or CUDA).
-
-    Returns:
-        dict: Dictionary of evaluation metrics
-    """
-
-    model.eval()
-    criterion = nn.CrossEntropyLoss()
-
-    total_loss = 0.0
-    correct_predictions = 0
-    total_predictions = 0
-
-    all_labels = []
-    all_preds = []
-    all_probs = []
-
-    with torch.no_grad():
-        for inputs, labels in dataloader:
-            inputs, labels = inputs.to(device), labels.to(device)
-
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-
-            total_loss += loss.item()
-
-            probs = torch.softmax(outputs, dim=1)
-            preds = torch.argmax(probs, dim=1)
-
-            all_labels.extend(labels.cpu().numpy())
-            all_preds.extend(preds.cpu().numpy())
-            all_probs.extend(probs[:, 1].cpu().numpy())
-
-            correct_predictions += torch.sum(preds == labels).item()
-            total_predictions += labels.size(0)
-
-    eval_loss = total_loss / len(dataloader)
-    eval_acc = correct_predictions / total_predictions
-
-    # Metrics
-    epoch_recall = recall_score(all_labels, all_preds)
-    epoch_precision = precision_score(all_labels, all_preds)
-    epoch_f1 = f1_score(all_labels, all_preds)
-
-    try:
-        epoch_roc_auc = roc_auc_score(all_labels, all_probs)
-    except ValueError:
-        epoch_roc_auc = float("nan")  # roc_auc fails if only one class is present
-
-    try:
-        tn, fp, fn, tp = confusion_matrix(all_labels, all_preds).ravel()
-        epoch_specificity = tn / (tn + fp) if (tn + fp) != 0 else float("nan")
-    except ValueError:
-        epoch_specificity = float("nan")  # confusion_matrix may fail on edge cases
-
-    return {
-        "loss": eval_loss,
-        "accuracy": eval_acc,
-        "precision": epoch_precision,
-        "recall": epoch_recall,
-        "f1": epoch_f1,
-        "roc_auc": epoch_roc_auc,
-        "specificity": epoch_specificity
-    }
 
 def log_metrics(metrics: dict, 
                 dataset_name: str, 

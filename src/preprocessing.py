@@ -5,13 +5,6 @@
 
 import torchvision.transforms as transforms
 
-# Preprocessing process:
-# Resize images
-# Greyscale to RGB conversion - models expect 3 channels
-# Data normalization
-# Data augmentations - for training only
-# Tensor conversion
-
 # Normalisation with the use of ImageNet mean and standard
 imgNetMean = [0.485, 0.456, 0.406]
 imgNetStd = [0.229, 0.224, 0.225]
