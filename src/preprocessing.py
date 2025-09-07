@@ -9,7 +9,20 @@ import torchvision.transforms as transforms
 imgNetMean = [0.485, 0.456, 0.406]
 imgNetStd = [0.229, 0.224, 0.225]
 
-def apply_transforms(model_type):
+def apply_transforms(model_type:str) -> tuple:
+    """
+    Create training and validation image transforms based on the model type.
+
+    Args:
+        model_type (str): Name of the model architecture. Supported: 'resnet50', 'densenet121', 'inception_v3'.
+
+    Returns:
+        Tuple[transforms.Compose, transforms.Compose]: A tuple containing (training_transform, validation_transform).
+
+    Raises:
+        ValueError: If the model_type is not recognized.
+    """
+
     if model_type in ["resnet50" , "densenet121"]:
         img_size = 512
     elif model_type == "inception_v3":
