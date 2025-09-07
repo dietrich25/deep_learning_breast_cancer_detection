@@ -14,7 +14,7 @@ from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_sc
 def evaluate_model_performance(model:nn.Module, 
                                dataloader:DataLoader, 
                                criterion:nn.Module, 
-                               device:torch.Device) -> tuple:
+                               device:torch.device) -> tuple:
     """
     Evaluate a model's performance on a dataset using the given loss criterion.
 
@@ -70,7 +70,7 @@ def evaluate_model_performance(model:nn.Module,
 
 def evaluate_hard_voting(model: nn.Module, 
                          dataloader: DataLoader, 
-                         device: torch.Device) -> dict:
+                         device: torch.device) -> dict:
     """
     Evaluate a hard voting ensemble on a dataset.
 
@@ -102,7 +102,7 @@ def evaluate_hard_voting(model: nn.Module,
 
 def evaluate_ensemble(model:nn.Module, 
                       dataloader: DataLoader, 
-                      device: torch.Device) -> dict:
+                      device: torch.device) -> dict:
     """
     Evaluate a soft or weighted soft voting ensemble.
 

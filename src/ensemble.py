@@ -9,12 +9,11 @@ import torch.nn as nn
 import pandas as pd
 from preprocessing import apply_transforms
 from datasets import CBISDDSMDataset,MIASDataset, load_mias_dataset
-from evaluation import evaluate_hard_voting, evaluate_ensemble
+from evaluation import evaluate_hard_voting, evaluate_ensemble, log_metrics
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 import os
 from utils import setup_logging, load_model
-from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score, roc_auc_score, confusion_matrix
 from collections import Counter
 from datetime import datetime
 import logging
@@ -129,32 +128,6 @@ class HardVotingEnsemble(nn.Module):
             voted_preds.append(most_common)
 
         return torch.tensor(voted_preds, device=x.device)
-
-def log_metrics(metrics: dict, 
-                dataset_name: str, 
-                ensemble_method_name: str) -> None:
-    """
-    Log evaluation metrics for a dataset and ensemble method.
-
-    Args:
-        metrics (dict): Dictionary of computed evaluation metrics.
-        dataset_name (str): Dataset identifier (e.g., "cbis-ddsm").
-        ensemble_method_name (str): Ensemble method identifier (e.g., "softvoting").
-    """
-    val_acc         = metrics["accuracy"]
-    val_precision   = metrics["precision"]
-    val_recall      = metrics["recall"]
-    val_f1          = metrics["f1"]
-    val_roc_auc     = metrics["roc_auc"]
-    val_specificity = metrics["specificity"]
-
-    logging.info(f"---- Validation Metrics for {ensemble_method_name} Ensemble on {dataset_name} set:----")
-    logging.info(f"Accuracy       : {val_acc}")
-    logging.info(f"Precision      : {val_precision}")
-    logging.info(f"Recall         : {val_recall}")
-    logging.info(f"F1 Score       : {val_f1}")
-    logging.info(f"ROC AUC        : {val_roc_auc}")
-    logging.info(f"Specificity    : {val_specificity}")
 
 def main() -> None:
     """
