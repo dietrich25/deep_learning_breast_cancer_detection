@@ -130,6 +130,20 @@ def adjust_optimizer(model: torch.nn.Module,
                       classifier_lr: float,
                       backbone_lr: float) -> torch.nn.Module:
     
+    """
+    Creates an optimizer with different learning rates for classifier and backbone parameters.
+
+    Args:
+        model (torch.nn.Module): The model containing trainable parameters.
+        model_name (str): Name of the model architecture.
+        optimizer_name (str): Optimizer to use ('adam', 'adamw', 'sgd').
+        classifier_lr (float): Learning rate for classifier layer.
+        backbone_lr (float): Learning rate for backbone layers.
+
+    Returns:
+        torch.nn.Module: Initialized optimizer.
+    """
+    
     # Separate parameters
     classifier_params = []
     backbone_params = []
@@ -197,8 +211,20 @@ def optimizer_add_new_params(optimizer: torch.optim.Optimizer,
                             classifier_lr: float,
                             backbone_lr: float) -> torch.optim.Optimizer:
     
-    original_dict = optimizer.state_dict()
+    """
+    Adds newly trainable parameters to the optimizer (e.g. after unfreezing layers).
 
+    Args:
+        optimizer (torch.optim.Optimizer): Existing optimizer.
+        model (torch.nn.Module): Model with updated trainable parameters.
+        model_name (str): Name of the model architecture.
+        classifier_lr (float): Learning rate for classifier.
+        backbone_lr (float): Learning rate for backbone.
+
+    Returns:
+        torch.optim.Optimizer: Updated optimizer.
+    """
+    
     # Identify new parameters that need to be added
     existing_params = {id(p) for group in optimizer.param_groups for p in group['params']}
     all_trainable_params = {id(p) for p in model.parameters() if p.requires_grad}
@@ -223,7 +249,9 @@ def optimizer_add_new_params(optimizer: torch.optim.Optimizer,
     
     return optimizer
 
-def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> torch.nn.Module:
+def unfreeze_layer(model: torch.nn.Module, 
+                   model_name: str, 
+                   num_depth:int) -> torch.nn.Module:
     """
     Unfreezes a specified number of top blocks in a Pytorch model. 
 
@@ -239,15 +267,6 @@ def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> to
     Returns:
         model(torch.nn.Module): Pytorch model with selected layers unfrozen for training.
     """
-    """if model_name == "resnet50" or model_name == "inception_v3":
-        for param in model.fc.parameters():
-            param.requires_grad = True
-    elif model_name == "densenet121":
-        for param in model.classifier.parameters():
-            param.requires_grad = True
-    else:
-        logging.error(f"Invalid model_name passed to unfreeze_layer(): {model_name}.")
-        raise ValueError(f"Invalid parameter passed to unfreeze_layer(): {model_name}.")"""
 
     if num_depth == 0:
         pass
@@ -296,8 +315,21 @@ def unfreeze_layer(model: torch.nn.Module, model_name: str, num_depth:int) -> to
 
     return model
 
-def save_best_model(model_name:str, model_states:dict, metrics:dict, model_best_config:dict, config:dict):
-    """Saves model checkpoint."""
+def save_best_model(model_name: str, 
+                    model_states: dict, 
+                    metrics: dict, 
+                    model_best_config: dict, 
+                    config: dict) -> None:
+    """
+    Saves the best-performing model checkpoint to disk.
+
+    Args:
+        model_name (str): Model name.
+        model_states (dict): State dict from model.
+        metrics (dict): Evaluation metrics.
+        model_best_config (dict): Configuration used for best run.
+        config (dict): General config including 'checkpoints' directory.
+    """
 
     output_path = os.path.join(config["checkpoints"], f"{model_name}_best.pth")
 
@@ -311,7 +343,10 @@ def save_best_model(model_name:str, model_states:dict, metrics:dict, model_best_
 
     logging.info(f"Best model version for {model_name} saved.")
 
-def load_model(model_name: str, checkpoint: str, device:torch.device, num_classes:int) -> torch.nn.Module:
+def load_model(model_name: str, 
+               checkpoint: str, 
+               device: torch.device, 
+               num_classes: int) -> torch.nn.Module:
     """
     Loads a saved model checkpoint and sends it to the specified device.
 
