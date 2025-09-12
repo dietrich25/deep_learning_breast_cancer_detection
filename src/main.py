@@ -5,7 +5,8 @@
 
 
 import logging
-from datasets import CBISDDSMDataset, MIASDataset, load_cbis_ddsm_split, balance_cbis_ddsm_class_weights, get_dataset_labels, load_mias_dataset
+import argparse
+from datasets import CBISDDSMDataset, MIASDataset, load_cbis_ddsm_split, get_dataset_labels, load_mias_dataset, load_demo_dataset
 from preprocessing import apply_transforms
 from transfer_learning_trainer import single_phase_training
 from evaluation import evaluate_model_performance
@@ -20,22 +21,27 @@ import multiprocessing
 from torch.utils.data import WeightedRandomSampler
 import numpy as np
 
-def main():
+def parse_args():
+    parser = argparse.ArgumentParser(description="Transfer learning breast cancer classification")
+    parser.add_argument(
+        "mode",
+        choices=["training", "validation", "demo"],
+        help="Select mode: 'training' to train models, 'validation' to test best models, 'demo' to run demo inference."
+    )
+    return parser.parse_args()
 
-    run_training = True    
-    run_validation = False
+def main(mode):
 
     workflow_start_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     config = {
         "batch_size": 4,
-        "epochs": 1,
+        "epochs": 50,
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         "checkpoints": "./checkpoints",
         "results_path": "./results",
         "logs_path": "./logs"
-        #add early stop here and pass down
     }
 
     ### Setting up logging ###
@@ -46,19 +52,14 @@ def main():
     set_random_seeds(42)
 
     logging.info("----- Transfer learning ML workflow started -----")
+    logging.info(f"Workflow started in {mode} mode.")
     
     ### Model training main parameters ####
-    """Models = ["resnet50", "densenet121", "inception_v3"] 
+    Models = ["resnet50", "densenet121", "inception_v3"] 
     classifier_lr = [1e-3, 1e-4]
     backbone_lr = [1e-4, 1e-5]
     Optimizers = ["adam","adamw","sgd"]
-    Depth = [1, 2] """
-
-    Models = ["resnet50", "densenet121", "inception_v3"] 
-    classifier_lr = [1e-4]
-    backbone_lr = [1e-5]
-    Optimizers = ["adam"]
-    Depth = [1] 
+    Depth = [1, 2] 
 
     ### Result trackers ###
     best_models = {}
@@ -68,25 +69,33 @@ def main():
     create_dirs(config)
 
     ### Load datasets ### 
-    try:
-        train_df_path = "./data/processed/combined_training_set_mapped.csv"
-        test_df_path = "./data/processed/combined_test_set_mapped.csv"
-        mias_path = "./data/processed/mias_external_verification_set.csv"
+    if mode == "training" or mode == "validation":
+        try:
+            train_df_path = "./data/processed/combined_training_set_mapped.csv"
+            test_df_path = "./data/processed/combined_test_set_mapped.csv"
+            mias_path = "./data/processed/mias_external_verification_set.csv"
+            train_df, val_df, test_df = load_cbis_ddsm_split(train_df_path,
+                                                            test_df_path,
+                                                            val_split_ratio=0.25,
+                                                            random_state=42)
+                
+            external_dataset = load_mias_dataset(mias_path)
+                
+            logging.info("Datasets successfully loaded.")
+        except Exception as e:
+            logging.error(f"Dataset loading failed with error {str(e)}")
+            return
+    else:
+        demo_df = load_demo_dataset("./data/processed/combined_test_set_mapped.csv", n_samples=5, random_state=35)
+        cols = ["patient_id", "left_or_right_breast", "abnormality_type", "pathology"]
 
-        train_df, val_df, test_df = load_cbis_ddsm_split(train_df_path,
-                                                        test_df_path,
-                                                        val_split_ratio=0.25,
-                                                        random_state=42)
-        
-        external_dataset = load_mias_dataset(mias_path)
-        
-        logging.info("Datasets successfully loaded.")
-    except Exception as e:
-        logging.error(f"Dataset loading failed with error {str(e)}")
-        return
+        for i, row in demo_df[cols].head(5).iterrows():
+            logging.info(
+                f"Patient {row['patient_id']} | Side: {row['left_or_right_breast']} | Type: {row['abnormality_type']} | Pathology: {row['pathology']}"
+            )
 
     #### Systematic model training preparation ####
-    if run_training:
+    if mode == "training":
         total_combinations = len(Models) * len(classifier_lr) * len(backbone_lr) * len(Optimizers) * len(Depth)
         combination_count = 0
         training_start = datetime.now()
@@ -201,7 +210,7 @@ def main():
             json.dump(best_models, f, indent=2)
         
     ### Validation of best performing single models on unseen data ###
-    if run_validation:
+    if mode == "validation":
         logging.info("Initialising model performance validation on test datasets.")
         validation_results = []
 
@@ -254,8 +263,26 @@ def main():
         eval_file = os.path.join(config["results_path"], f"model_evaluation_results_{workflow_start_timestamp}.json")
         with open(eval_file, 'w') as f:
             json.dump(validation_results, f, indent=2)
-  
+    
+    if mode == "demo":
+        for model_name in Models:
+            _, val_transform = apply_transforms(model_name)
+            demo_dataset = CBISDDSMDataset(demo_df, transform=val_transform)
+            demo_loader = DataLoader(demo_dataset, batch_size=4, shuffle=False)
+
+            checkpoint_path = os.path.join(config["checkpoints"], f"{model_name}_best.pth")
+            model = load_model(model_name=model_name,
+                               checkpoint=checkpoint_path,
+                               device=config["device"],
+                               num_classes=config["num_classes"])
+            
+            demo_loader = DataLoader(demo_dataset, batch_size=5, shuffle=False)
+            criterion = torch.nn.CrossEntropyLoss()
+            val_acc, val_loss, val_recall, val_precision, val_f1, val_roc_auc, val_specificity = evaluate_model_performance(model, 
+                                                                                                demo_loader, 
+                                                                                                criterion, config["device"])
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-
-    main()
+    args = parse_args()
+    main(args.mode)

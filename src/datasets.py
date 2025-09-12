@@ -212,6 +212,22 @@ def load_mias_dataset(file_path:str) -> pd.DataFrame:
     
     return df
 
+def load_demo_dataset(csv_path: str, 
+                      n_samples: int, 
+                      random_state: int) -> pd.DataFrame:
+    """
+    Load a random sample from a dataset.
+
+    Args:
+        csv_path (str): Path for the dataset metadata file.
+        n_sample (int): Sample size.
+        random_state (int): Random seed for reproducibility.
+    
+    Returns:
+        pd.Dataframe: Random sample from dataset
+    """
+    df = pd.read_csv(csv_path)
+    return df.sample(n=min(n_samples, len(df)), random_state=random_state)
 
 class CBISDDSMDataset(Dataset):
     """
