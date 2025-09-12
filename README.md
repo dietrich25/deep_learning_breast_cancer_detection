@@ -42,15 +42,15 @@ This project explores the use of convolutional neural networks (CNNs) for automa
 - **Cross-validation**: Stratified validation with consistent random seeds
 
 ## Results
-**Transfer Learning**: Classifier and backbone training improves model performance significantly compared to models with ImageNet weights
-**Ensemble Advantage**: 3-5% improvement in recall over individual models
-**Resolution Impact**: 512×512 optimal balance of performance vs. computational cost
-**Domain Shift Challenge**: Significant performance drop on external dataset highlights generalization limits
+- **Transfer Learning**: Classifier and backbone training improves model performance significantly compared to models with ImageNet weights
+- **Ensemble Advantage**: 3-5% improvement in recall over individual models
+- **Resolution Impact**: 512×512 optimal balance of performance vs. computational cost
+- **Domain Shift Challenge**: Significant performance drop on external dataset highlights generalization limits
 
 ## Proposed Improvements
-**Patch-based Classification**: Process localized regions for enhanced feature extraction
-**Multi-modal Integration**: Combine imaging with patient metadata (age, family history)
-**Advanced Ensemble Methods**: Stacking, attention-based fusion, meta-learning approaches
-**Interpretability Enhancement**: Gradient-CAM, attention maps for clinical transparency
-**Dataset Diversification**: Include normal cases and broader pathology representation
+- **Patch-based Classification**: Process localized regions for enhanced feature extraction
+- **Multi-modal Integration**: Combine imaging with patient metadata (age, family history)
+- **Advanced Ensemble Methods**: Stacking, attention-based fusion, meta-learning approaches
+- **Interpretability Enhancement**: Gradient-CAM, attention maps for clinical transparency
+- **Dataset Diversification**: Include normal cases and broader pathology representation
 
