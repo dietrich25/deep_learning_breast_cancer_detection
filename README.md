@@ -13,8 +13,17 @@ This project explores the use of convolutional neural networks (CNNs) for automa
 - *Validate generalization capability across different datasets and imaging protocols*
 
 ## Datasets
+This project requires two publicly available mammography datasets:
 - **CBIS-DDSM**: https://www.cancerimagingarchive.net/collection/cbis-ddsm/
 - **Mini-MIAS**: http://peipa.essex.ac.uk/info/mias.html
+
+1. Download the datasets and store them under './data/raw/CBIS-DDSM' and './data/raw/MIAS' (or update paths accordingly).  
+2. Run the provided preprocessing scripts to generate the processed CSV files that include **correct local file paths** for your system:
+   - './data/processed/combined_training_set_mapped.csv'
+   - './data/processed/combined_test_set_mapped.csv'
+   - './data/processed/mias_external_verification_set.csv'
+
+These processed resource files are required for training, evaluation, and demo modes to correctly locate the mammogram images on your machine.
 
 ## Methodology
 **Data Preprocessing:**
@@ -54,3 +63,15 @@ This project explores the use of convolutional neural networks (CNNs) for automa
 - **Interpretability Enhancement**: Gradient-CAM, attention maps for clinical transparency
 - **Dataset Diversification**: Include normal cases and broader pathology representation
 
+## Execute the workflow
+Before running the workflow, ensure that all dependencies are installed.  
+From the project root, run: pip install -r requirements.txt
+
+**The main workflow can be executed in three modes**: 'training' / 'validation' / 'demo'
+- python main.py training
+- python main.py validation
+- python main.py demo
+
+**The ensemble workflow can be executed with two modes**: 'validation' / 'demo'
+- python ensemble.py validation
+- python ensemble.py demo
