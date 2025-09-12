@@ -7,6 +7,8 @@
 # https://scikit-learn.org/stable/modules/model_evaluation.html
 # https://stackoverflow.com/questions/33275461/specificity-in-scikit-learn
 # https://www.geeksforgeeks.org/deep-learning/how-to-handle-overfitting-in-pytorch-models-using-early-stopping/
+# https://docs.pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
+
 
 from torch.utils.data import DataLoader
 from torch import optim
@@ -15,11 +17,20 @@ import torch.nn as nn
 import torchvision.models as models
 import logging
 import time
-from utils import unfreeze_layer, adjust_optimizer, optimizer_add_new_params
+from utils import unfreeze_layer
 from evaluation import evaluate_model_performance
 
-# code adapted from https://www.geeksforgeeks.org/deep-learning/how-to-handle-overfitting-in-pytorch-models-using-early-stopping/
 class Earlystopping:
+    """
+    Implements early stopping to halt training when validation metric stops improving.
+
+    Attributes:
+        patience (int): Number of epochs to wait after no improvement.
+        delta (float): Minimum change in the monitored metric to qualify as improvement.
+        best_score (float or None): Best score seen so far.
+        early_stop (bool): Flag indicating whether training should stop.
+        counter (int): Counter for epochs without improvement.
+    """
     def __init__(self, patience=5, delta=0.01):
         self.patience = patience
         self.delta = delta
@@ -27,7 +38,16 @@ class Earlystopping:
         self.early_stop = False
         self.counter = 0
 
-    def __call__(self, current_score):
+    def __call__(self, current_score: float) -> bool:
+        """
+        Check whether training should stop based on the current score.
+
+        Args:
+            current_score (float): Current epoch's validation score (e.g. F1, accuracy).
+
+        Returns:
+            bool: True if early stopping condition is met, False otherwise.
+        """
 
         if self.best_score is None:
             self.best_score = current_score
@@ -43,7 +63,27 @@ class Earlystopping:
 
         return self.counter >= self.patience
      
-def train_epoch(model, dataloader, criterion, optimizer, device, accumulation_steps = 4):
+def train_epoch(model: torch.nn.Module, 
+                dataloader: DataLoader, 
+                criterion: torch.nn.Module, 
+                optimizer: torch.optim.Optimizer, 
+                device: torch.device, 
+                accumulation_steps: int = 4) -> tuple:
+    
+    """
+    Train the model for one epoch with gradient accumulation.
+
+    Args:
+        model (torch.nn.Module): Model to train.
+        dataloader (DataLoader): Training data loader.
+        criterion (torch.nn.Module): Loss function.
+        optimizer (torch.optim.Optimizer): Optimizer for model parameters.
+        device (torch.device): Computation device (CPU or GPU).
+        accumulation_steps (int, optional): Number of steps to accumulate gradients before updating. Default is 4.
+
+    Returns:
+        Tuple[float, float]: Training accuracy and training loss.
+    """
 
     start_time = time.time()
 
@@ -72,8 +112,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device, accumulation_st
       
 
         if(batch_idx+1)%accumulation_steps == 0 or (batch_idx+1) == num_batches:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # clip gradients
-
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) 
             optimizer.step()
             optimizer.zero_grad()
 
@@ -92,14 +131,14 @@ def train_epoch(model, dataloader, criterion, optimizer, device, accumulation_st
 
     return epoch_acc, epoch_loss
     
-def prepare_model(model_name: str, num_classes: int, training_depth: str) -> torch.nn.Module:
+def prepare_model(model_name: str, 
+                  num_classes: int) -> torch.nn.Module:
     """
     Prepare a pre-trained CNN model for transfer learning with a specific training depth
 
     Args:
         model_name(str): Name of the model ("resnet, "densenet", "inception")
         num_classes(int): Number of output classes
-        training_depth(str): Parameter unfreeze strategy ("classifier_only", "last_layer", "last_2_layers")
         
     Returns:
         torch.nn.Module: Prepared model
@@ -153,7 +192,6 @@ def prepare_model(model_name: str, num_classes: int, training_depth: str) -> tor
     logging.debug(f"Model {model_name} prepared for training...")
     return model
 
-# code adapted from https://docs.pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
 def train_model_phase(model: torch.nn.Module,
                 model_name:str,
                 phase: str,
@@ -163,6 +201,27 @@ def train_model_phase(model: torch.nn.Module,
                 train_dataloader: DataLoader,
                 validation_dataloader: DataLoader,
                 config: dict) -> tuple:
+    """
+    Train a model for one phase (classifier or backbone training) when using progressive 2-phase training.
+
+    Args:
+        model (torch.nn.Module): The model to train.
+        model_name (str): Name of the model architecture.
+        phase (str): Training phase name (e.g., "classifier", "backbone_1").
+        learning_rate (float): Initial learning rate used in this phase.
+        optimizer (torch.optim.Optimizer): Optimizer to update model parameters.
+        criterion (torch.nn.Module): Loss function.
+        train_dataloader (DataLoader): Dataloader for training data.
+        validation_dataloader (DataLoader): Dataloader for validation data.
+        config (dict): Configuration settings.
+
+    Returns:
+        tuple:
+            - history (dict): Training and validation metrics for all epochs.
+            - best_model_state_dict (dict): Model weights from best epoch.
+            - best_optimizer_state_dict (dict): Optimizer state from best epoch.
+            - best_metrics (dict): Best validation metrics achieved.
+    """
     
     total_start_time = time.time()
     logging.debug(f"Initialising {phase} phase training for {model_name}...")
@@ -180,7 +239,6 @@ def train_model_phase(model: torch.nn.Module,
     }
 
     best_f1 = 0.0
-    best_roc_auc = 0.0
     best_model_state_dict = None
     best_optimizer_state_dict = None
     best_metrics = {}
@@ -243,143 +301,6 @@ def train_model_phase(model: torch.nn.Module,
 
     return history, best_model_state_dict, best_optimizer_state_dict, best_metrics
 
-def progressive_model_training_test(model_name: str,
-                            classifier_lr: float,
-                            backbone_lr: float,
-                            optimizer_name: str,
-                            training_depth: int,
-                            train_loader: DataLoader,
-                            val_loader: DataLoader,
-                            config: dict,
-                            class_weigths: torch.FloatTensor):
-            
-    prog_start_time = time.time()
-
-    # Record training and validation results
-    full_history = {
-        "phase": [],
-        "model_name": [], "LR": [], "training_depth": [], "optimizer": [],
-        "train_loss": [], "train_acc": [],
-        "val_acc": [], "val_loss": [], "val_recall": [], "val_precision": [],
-        "val_f1": [], "val_roc_auc": [], "val_specificity": []
-    }
-
-    # General performance trackers
-    overall_best_f1 = 0.0
-    overall_best_ROC_AUC = 0.0
-    overall_best_state = None
-    overall_best_metrics = {}
-
-    ### Phase 1 - Replace and train classifier layer ####
-    logging.info("-- Phase 1: Classifier layer training --")
-
-    # Load model with pre-trained weights and replaced, unfrozen classifier
-    model = prepare_model(model_name, config["num_classes"], "classifier_only")
-    model = model.to(config["device"])
-    # Set model to training state
-    model.train()
-    logging.debug("Model training mode activated...")
-
-
-    # Initialise loss function
-    criterion = torch.nn.CrossEntropyLoss(weight=class_weigths,label_smoothing=0.05)
-
-    # Initialise optimizer
-    if optimizer_name == "adam":
-        optimizer = optim.Adam(model.parameters(), lr=classifier_lr, weight_decay=1e-5, betas=(0.9, 0.999))
-    elif optimizer_name == "adamw":
-        optimizer = optim.AdamW(model.parameters(), lr=classifier_lr, weight_decay=0.05)
-    elif optimizer_name == "sgd":
-        optimizer = optim.SGD(model.parameters(), lr=classifier_lr, momentum=0.9, weight_decay=1e-5, nesterov=True)
-    else:
-        logging.error(f"Invalid optimizer passed to progressive_model_training(): {optimizer_name}")
-        raise ValueError(f"Invalid optimizer: {optimizer_name}")
-            
-    phase1_history, phase1_best_state, phase1_best_optimizer_state, phase1_best_metrics = train_model_phase(
-        model=model,
-        model_name=model_name,
-        phase="classifier",
-        learning_rate = classifier_lr,
-        optimizer=optimizer,
-        criterion=criterion,
-        train_dataloader=train_loader,
-        validation_dataloader=val_loader,
-        config=config
-    )
-
-    # Append training history
-    for key in phase1_history:
-        if key == "phase":
-            full_history[key].extend(["classifier"] * len(phase1_history["train_loss"]))
-        elif key in full_history:
-            full_history[key].extend(phase1_history[key])
-
-    # Update best performance trackers
-    if phase1_best_metrics["f1"] > overall_best_f1:
-        overall_best_f1 = phase1_best_metrics["f1"]
-        overall_best_state = phase1_best_state
-        overall_best_metrics = phase1_best_metrics
-        overall_best_metrics["phase"] = "classifier"
-
-    if training_depth > 0 and phase1_best_state is not None:
-        try:
-            model.load_state_dict(phase1_best_state)
-            logging.info("Best performing model state passed to phase 2.")
-        except Exception as e:
-            logging.error(f"Failed to load previous best model state: {e}")
-            raise RuntimeError("Failed to load previous best model state") from e
-        model = unfreeze_layer(model, model_name, training_depth)
-
-        if training_depth == 1:
-            try:
-                optimizer.load_state_dict(phase1_best_optimizer_state)
-                optimizer = optimizer_add_new_params(optimizer, model, model_name, classifier_lr, backbone_lr)
-            except Exception as e:
-                logging.error(f"Failed to load and adjust previous best optimizer state: {e}")
-                raise RuntimeError("Failed to load and adjust previous best optimizer state") from e
-        else:
-            # Initialise new optimizer with adjusted learning rates
-            optimizer = adjust_optimizer(model=model,
-                model_name=model_name,
-                optimizer_name=optimizer_name,
-                classifier_lr=classifier_lr, 
-                backbone_lr=backbone_lr
-            )
-
-        logging.info("-- Phase 2: Progressive backbone training --")
-        phase2_history, phase2_best_state, phase2_best_optimizer_state, phase2_best_metrics = train_model_phase(
-            model=model,
-            model_name=model_name,
-            phase=f"backbone_{training_depth}",
-            learning_rate = classifier_lr,
-            optimizer=optimizer,
-            criterion=criterion,
-            train_dataloader=train_loader,
-            validation_dataloader=val_loader,
-            config=config
-        )
-
-        # Update history
-        for key in phase2_history:
-            if key == "phase":
-                full_history[key].extend([f"backbone_{training_depth}"] * len(phase2_history["train_loss"]))
-            elif key in full_history:
-                full_history[key].extend(phase2_history[key])
-        
-        # Update performance trackers
-        if phase2_best_metrics["f1"] > overall_best_f1:
-            overall_best_f1 = phase2_best_metrics["f1"]
-            overall_best_state = phase2_best_state
-            overall_best_metrics = phase2_best_metrics
-            overall_best_metrics["phase"] = f"backbone_depth_{training_depth}"
-        
-    prog_end_time = time.time()
-    total_time = prog_end_time - prog_start_time
-    logging.info(f"--- Progressive model training finished in {total_time/60:.1f} minutes. Best ROC_AUC: {overall_best_ROC_AUC:.4f} ---")
-
-    return full_history, overall_best_state, overall_best_metrics
-
-
 def progressive_model_training(model_name: str,
                                     classifier_lr: float,
                                     backbone_lr: float,
@@ -389,7 +310,28 @@ def progressive_model_training(model_name: str,
                                     val_loader: DataLoader,
                                     config: dict,
                                     class_weights: torch.FloatTensor):
+    """
+    Progressive training pipeline with two phases:
+    1. Train only the classifier (newly initialized head).
+    2. Optionally unfreeze part of the backbone and fine-tune with differentiated learning rates for classifier vs backbone.
 
+    Args:
+        model_name (str): Model architecture ('resnet50', 'densenet121', 'inception_v3').
+        classifier_lr (float): Learning rate for classifier.
+        backbone_lr (float): Learning rate for backbone (used in phase 2).
+        optimizer_name (str): Optimizer choice ('adam', 'adamw', 'sgd').
+        training_depth (int): How many layers of the backbone to unfreeze for fine-tuning.
+        train_loader (DataLoader): Training dataset loader.
+        val_loader (DataLoader): Validation dataset loader.
+        config (dict): Configuration settings.
+        class_weights (torch.FloatTensor): Class weights for handling class imbalance.
+
+    Returns:
+        tuple: (full_history, overall_best_state, overall_best_metrics)
+            - full_history: Dict with training/validation metrics across both phases.
+            - overall_best_state: Model state dict of the best performing phase.
+            - overall_best_metrics: Dict of the best validation metrics.
+    """
     prog_start_time = time.time()
     
     full_history = {
@@ -503,14 +445,23 @@ def progressive_model_training(model_name: str,
 
     return full_history, overall_best_state, overall_best_metrics
 
-def setup_differentiated_optimizer_phase2(model: torch.nn.Module,
-                                          
+def setup_differentiated_optimizer_phase2(model: torch.nn.Module,    
                                          model_name: str,
                                          optimizer_name: str,
                                          classifier_lr: float,
                                          backbone_lr: float) -> torch.optim.Optimizer:
     """
-    Create a fresh optimizer for phase 2 with differentiated learning rates
+    Create a fresh optimizer for phase 2 with differentiated learning rates (classifier and backbone).
+    
+    Args:
+        model (torch.nn.Module): The PyTorch model to optimize.
+        model_name (str): Model identifier, used to locate classifier parameters (supports 'resnet50', 'inception_v3', 'densenet121').
+        optimizer_name (str): Optimizer type ('adam', 'adamw', 'sgd').
+        classifier_lr (float): Learning rate for the classifier parameters.
+        backbone_lr (float): Learning rate for the backbone parameters.
+    
+    Returns:
+        torch.optim.Optimizer: Configured optimizer with parameter groups.
     """
     # Get classifier parameters
     if model_name in ["resnet50", "inception_v3"]:
@@ -543,14 +494,25 @@ def setup_differentiated_optimizer_phase2(model: torch.nn.Module,
     
     return optimizer
 
-# simplified trainign pipeline to fix likely gradient issues between phases and make debugging eaiser
-# also 2 phase training took due to 2x early stopping limits
-# now classifier and lower layers are trained together
+def prepare_model_simple(model_name: str, 
+                         num_classes: int, 
+                         training_depth: int) -> torch.nn.Module:
+    """
+    Prepare a pretrained model for transfer learning with selective unfreezing.
+    1. Loads a pretrained model (ResNet50, DenseNet121, or InceptionV3).
+    2. Freezes all layers by default.
+    3. Replaces the classifier with a new one matching the desired number of classes.
+    4. Unfreezes the classifier and optionally part of the backbone depending on training_depth.
+    
+    Args:
+        model_name (str): Model identifier ('resnet50', 'densenet121', 'inception_v3').
+        num_classes (int): Number of output classes for the classifier.
+        training_depth (int): How many layers of the backbone to unfreeze (0 = classifier only).
+    
+    Returns:
+        torch.nn.Module: Modified model ready for training.
+    """
 
-def prepare_model_simple(model_name: str, num_classes: int, training_depth: int) -> torch.nn.Module:
-    """
-    Prepare model with unfrozen layers based on training depth from the start
-    """
     logging.debug(f"Initialising {model_name} with {num_classes} classes.")
 
     if model_name == "resnet50":
@@ -588,7 +550,7 @@ def prepare_model_simple(model_name: str, num_classes: int, training_depth: int)
         )
         model.classifier = new_classifier
     
-    # Always unfreeze classifier (new classifier is unfrozen by default)
+    # Always unfreeze classifier 
     classifier = getattr(model, classifier_name)
     for param in classifier.parameters():
         param.requires_grad = True
@@ -607,7 +569,17 @@ def setup_differentiated_optimizer(model: torch.nn.Module,
                                  classifier_lr: float, 
                                  backbone_lr: float) -> torch.optim.Optimizer:
     """
-    Create optimizer with different learning rates for classifier and backbone
+    Create a fresh optimizer for general purpose (non-multi-phase) model training.
+    
+    Args:
+        model (torch.nn.Module): The PyTorch model to optimize.
+        model_name (str): Model identifier, used to locate classifier parameters (supports 'resnet50', 'inception_v3', 'densenet121').
+        optimizer_name (str): Optimizer type ('adam', 'adamw', 'sgd').
+        classifier_lr (float): Learning rate for the classifier parameters.
+        backbone_lr (float): Learning rate for the backbone parameters.
+    
+    Returns:
+        torch.optim.Optimizer: Configured optimizer with parameter groups.
     """
     # Get classifier parameters (convert generator to list and filter for requires_grad)
     if model_name in ["resnet50", "inception_v3"]:
@@ -664,10 +636,28 @@ def single_phase_training(model_name: str,
                          training_depth: int,
                          train_loader: DataLoader,
                          val_loader: DataLoader,
-                         config: dict,
-                         class_weights: torch.FloatTensor):
+                         config: dict) -> tuple:
     """
-    Single-phase training with differentiated learning rates
+    Train a model in a single phase using differentiated learning rates for classifier and backbone.
+    Classifier and backbone layers are trained together in a single loop.
+
+    Args:
+        model_name (str): Model architecture ('resnet50', 'densenet121', 'inception_v3').
+        classifier_lr (float): Learning rate for classifier parameters.
+        backbone_lr (float): Learning rate for backbone parameters.
+        optimizer_name (str): Optimizer ('adam', 'adamw', 'sgd').
+        training_depth (int): How many layers of the backbone to unfreeze.
+        train_loader (DataLoader): Training data loader.
+        val_loader (DataLoader): Validation data loader.
+        config (dict): Training configuration (epochs, device, etc.).
+        class_weights (torch.FloatTensor): Class weights (not used here, 
+                                           criterion uses unweighted loss).
+
+    Returns:
+        tuple: (history, best_model_state, best_metrics)
+            - history: Training/validation metrics per epoch.
+            - best_model_state: Weights of the best-performing model.
+            - best_metrics: Metrics of the best-performing epoch.
     """
     start_time = time.time()
     

@@ -1,11 +1,13 @@
 # Sources used:
 # https://medium.com/@yennhi95zz/logging-the-effective-management-of-machine-learning-systems-e1eb04e74eb5
+# https://towardsdatascience.com/demystifying-pytorchs-weightedrandomsampler-by-example-a68aceccb452/
+# https://stackoverflow.com/questions/60812032/using-weightedrandomsampler-in-pytorch
 
-import argparse
+
 import logging
 from datasets import CBISDDSMDataset, MIASDataset, load_cbis_ddsm_split, balance_cbis_ddsm_class_weights, get_dataset_labels, load_mias_dataset
 from preprocessing import apply_transforms
-from transfer_learning_trainer import progressive_model_training, progressive_model_training_test, single_phase_training
+from transfer_learning_trainer import single_phase_training
 from evaluation import evaluate_model_performance
 from utils import create_dirs, set_random_seeds, setup_logging, save_best_model, load_model
 from torch.utils.data import DataLoader
@@ -20,14 +22,14 @@ import numpy as np
 
 def main():
 
-    run_training = False    
-    run_validation = True
+    run_training = True    
+    run_validation = False
 
     workflow_start_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     config = {
         "batch_size": 4,
-        "epochs": 50,
+        "epochs": 1,
         "num_classes": 2,
         "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
         "checkpoints": "./checkpoints",
@@ -46,11 +48,17 @@ def main():
     logging.info("----- Transfer learning ML workflow started -----")
     
     ### Model training main parameters ####
-    Models = ["resnet50", "densenet121", "inception_v3"] 
+    """Models = ["resnet50", "densenet121", "inception_v3"] 
     classifier_lr = [1e-3, 1e-4]
     backbone_lr = [1e-4, 1e-5]
     Optimizers = ["adam","adamw","sgd"]
-    Depth = [1, 2] 
+    Depth = [1, 2] """
+
+    Models = ["resnet50", "densenet121", "inception_v3"] 
+    classifier_lr = [1e-4]
+    backbone_lr = [1e-5]
+    Optimizers = ["adam"]
+    Depth = [1] 
 
     ### Result trackers ###
     best_models = {}
@@ -96,12 +104,10 @@ def main():
             train_dataset = CBISDDSMDataset(train_df, transform=train_transform)
             val_dataset = CBISDDSMDataset(val_df, transform=val_transform)
 
-            # get balanced class weights
+            # get balanced class weights - used only in progressive, multiphase training
             dataset_labels = get_dataset_labels(train_df)
-            class_weights = balance_cbis_ddsm_class_weights(dataset_labels, config["device"])
+            #class_weights = balance_cbis_ddsm_class_weights(dataset_labels, config["device"])
 
-            # https://towardsdatascience.com/demystifying-pytorchs-weightedrandomsampler-by-example-a68aceccb452/
-            # https://stackoverflow.com/questions/60812032/using-weightedrandomsampler-in-pytorch
             targets = np.array(dataset_labels)
             class_sample_count = np.array([len(np.where(targets == t)[0]) for t in np.unique(targets)])
             weights = 1. / class_sample_count
@@ -124,8 +130,6 @@ def main():
                                     num_workers=10,
                                     pin_memory=True)
             
-            
-
             ### Store best performing model constellation ###
             model_best_f1 = 0.0
             model_best_config = None
@@ -138,16 +142,6 @@ def main():
             
                 combination_count += 1
                 logging.info(f"---- Config {combination_count}/{total_combinations} | Model: {model_name} | Classifier LR:{class_lr} | Backbone LR: {back_lr}| Optimizer:{optimizer_name} | Layers unfrozen:{depth} ----")
-
-                """history, best_model_state, best_metrics = progressive_model_training(model_name=model_name,
-                        classifier_lr=class_lr,
-                        backbone_lr=back_lr,
-                        optimizer_name=optimizer_name,
-                        training_depth=depth,
-                        train_loader=train_loader,
-                        val_loader=val_loader,
-                        config=config,
-                        class_weigths=class_weights)"""
                 
                 history, best_model_state, best_metrics = single_phase_training(
                     model_name=model_name,
@@ -157,8 +151,7 @@ def main():
                     training_depth=depth,
                     train_loader=train_loader,
                     val_loader=val_loader,
-                    config=config,
-                    class_weights=class_weights  
+                    config=config
                 )
 
                 results.append({"model_name": model_name,
