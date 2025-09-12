@@ -4,11 +4,13 @@
 # https://www.geeksforgeeks.org/machine-learning/voting-classifier/
 # https://machinelearningmastery.com/voting-ensembles-with-python/
 
+import argparse
+import multiprocessing
 import torch
 import torch.nn as nn
 import pandas as pd
 from preprocessing import apply_transforms
-from datasets import CBISDDSMDataset,MIASDataset, load_mias_dataset
+from datasets import CBISDDSMDataset,MIASDataset, load_mias_dataset, load_demo_dataset
 from evaluation import evaluate_hard_voting, evaluate_ensemble, log_metrics
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
@@ -129,7 +131,16 @@ class HardVotingEnsemble(nn.Module):
 
         return torch.tensor(voted_preds, device=x.device)
 
-def main() -> None:
+def parse_args():
+    parser = argparse.ArgumentParser(description="Ensemble learning breast cancer classification")
+    parser.add_argument(
+        "mode",
+        choices=["validation", "demo"],
+        help="Select mode: 'validation' to test the ensemble, 'demo' to run demo inference."
+    )
+    return parser.parse_args()
+
+def main(mode) -> None:
     """
     Run evaluation workflow for pretrained CNN ensemble models.
     """
@@ -161,20 +172,30 @@ def main() -> None:
 
     ### Initialise dataloaders ###
     _, val_transform = apply_transforms("resnet50") # transformations has been unified
-    val_mass_dataset = CBISDDSMDataset(cbis_test_set, transform=val_transform)
-    val_loader = DataLoader(val_mass_dataset, 
-                           batch_size=8,
-                           shuffle=False,
-                           num_workers=4,
-                           pin_memory=True)
-    
-    external_dataset = load_mias_dataset(mias_path)
-    test_external = MIASDataset(external_dataset,transform=val_transform)
-    external_loader = DataLoader(test_external,
-                            batch_size=config["batch_size"],
+    if mode == "validation":
+        val_mass_dataset = CBISDDSMDataset(cbis_test_set, transform=val_transform)
+        val_loader = DataLoader(val_mass_dataset, 
+                            batch_size=8,
                             shuffle=False,
-                            num_workers=12,
+                            num_workers=4,
                             pin_memory=True)
+        
+        external_dataset = load_mias_dataset(mias_path)
+        test_external = MIASDataset(external_dataset,transform=val_transform)
+        external_loader = DataLoader(test_external,
+                                batch_size=config["batch_size"],
+                                shuffle=False,
+                                num_workers=12,
+                                pin_memory=True)
+    else:
+        demo_df = load_demo_dataset("./data/processed/combined_test_set_mapped.csv", n_samples=5, random_state=35)
+        cols = ["patient_id", "left_or_right_breast", "abnormality_type", "pathology"]
+        for i, row in demo_df[cols].head(5).iterrows():
+            logging.info(
+                f"Patient {row['patient_id']} | Side: {row['left_or_right_breast']} | Type: {row['abnormality_type']} | Pathology: {row['pathology']}"
+            )
+        demo_dataset = CBISDDSMDataset(demo_df, transform=val_transform)
+        demo_loader = DataLoader(demo_dataset, batch_size=5, shuffle=False)
 
     ### Load model checkpoints ###
     models = []
@@ -200,21 +221,29 @@ def main() -> None:
             ensemble = HardVotingEnsemble(models)
             ensemble.to(config["device"])
 
-        for set in datasets:
+        if mode == "validation":
+            for set in datasets:
+                if strategy == "softvoting" or strategy == "weightedsoftvoting":
+                    if set == "cbis-ddsm":
+                        metrics = evaluate_ensemble(ensemble, val_loader, config["device"])
+                    else:
+                        metrics = evaluate_ensemble(ensemble, external_loader, config["device"])
+                else:
+                    if set == "cbis-ddsm":
+                        metrics = evaluate_hard_voting(ensemble, val_loader, config["device"])
+                    else:
+                        metrics = evaluate_hard_voting(ensemble, external_loader, config["device"])
+                log_metrics(metrics, set, strategy)
+        else: # demo uses cbis-ddsm sample only
             if strategy == "softvoting" or strategy == "weightedsoftvoting":
-                if set == "cbis-ddsm":
-                    metrics = evaluate_ensemble(ensemble, val_loader, config["device"])
-                else:
-                    metrics = evaluate_ensemble(ensemble, external_loader, config["device"])
-                
+                metrics = evaluate_ensemble(ensemble, demo_loader, config["device"])
             else:
-                if set == "cbis-ddsm":
-                    metrics = evaluate_hard_voting(ensemble, val_loader, config["device"])
-                else:
-                    metrics = evaluate_hard_voting(ensemble, external_loader, config["device"])
-            log_metrics(metrics, set, strategy)
-                
+                metrics = evaluate_hard_voting(ensemble, demo_loader, config["device"])
+        log_metrics(metrics, "demo", strategy)
+        
     logging.info("Workflow ended")
 
 if __name__ == "__main__":
-    main()
+    multiprocessing.freeze_support()
+    args = parse_args()
+    main(args.mode)
