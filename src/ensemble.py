@@ -234,12 +234,13 @@ def main(mode) -> None:
                     else:
                         metrics = evaluate_hard_voting(ensemble, external_loader, config["device"])
                 log_metrics(metrics, set, strategy)
+            log_metrics(metrics, set, strategy)
         else: # demo uses cbis-ddsm sample only
             if strategy == "softvoting" or strategy == "weightedsoftvoting":
                 metrics = evaluate_ensemble(ensemble, demo_loader, config["device"])
             else:
                 metrics = evaluate_hard_voting(ensemble, demo_loader, config["device"])
-        log_metrics(metrics, "demo", strategy)
+            log_metrics(metrics, "demo", strategy)
         
     logging.info("Workflow ended")
 
