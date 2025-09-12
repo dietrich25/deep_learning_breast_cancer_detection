@@ -14,8 +14,7 @@ __pycache__
 #test file
 test.py
 
-#training checkpoints & results
-/checkpoints
+#results
 /results
 
 #training performance data
