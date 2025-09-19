@@ -67,11 +67,13 @@ These processed resource files are required for training, evaluation, and demo m
 Before running the workflow, ensure that all dependencies are installed.  
 From the project root, run: pip install -r requirements.txt
 
+To run the application correctly, ensure that the command is executed from the project’s root directory.
+
 **The main workflow can be executed in three modes**: 'training' / 'validation' / 'demo'
-- python main.py training
-- python main.py validation
-- python main.py demo
+- python src/main.py training
+- python src/main.py validation
+- python src/main.py demo
 
 **The ensemble workflow can be executed with two modes**: 'validation' / 'demo'
-- python ensemble.py validation
-- python ensemble.py demo
+- python src/ensemble.py validation
+- python src/ensemble.py demo
